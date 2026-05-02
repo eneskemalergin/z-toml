@@ -26,6 +26,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const parser_mod = @import("parser.zig");
+const typed_mod = @import("typed.zig");
 
 // ─── Re-export public types ───────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ pub const OffsetDateTime = types.OffsetDateTime;
 
 pub const ParseError = parser_mod.ParseError;
 pub const ErrorInfo = parser_mod.ErrorInfo;
+pub const ParseIntoError = typed_mod.ParseIntoError;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -63,4 +65,20 @@ pub fn parseSlice(
 pub fn deinit(table: *Table, gpa: std.mem.Allocator) void {
     types.deinitTable(table, gpa);
     gpa.destroy(table);
+}
+
+/// Parse `input` as TOML v1.1.0 and map the root table onto a value of type `T`.
+///
+/// `T` must be a struct whose field names correspond to TOML keys.
+/// See `src/typed.zig` for the full list of supported field types.
+///
+/// All output strings and slices are allocated with `gpa`.
+/// Using an `ArenaAllocator` is the simplest way to free everything at once.
+pub fn parseInto(
+    comptime T: type,
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+) ParseIntoError!T {
+    return typed_mod.parseInto(T, gpa, input, err_info);
 }

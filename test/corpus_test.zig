@@ -382,3 +382,185 @@ test "toml-test valid corpus parses and matches json" {
 test "toml-test invalid corpus rejects" {
     try runInvalidCorpus();
 }
+
+// ─── parseInto corpus sweeps ──────────────────────────────────────────────────
+//
+// These tests run the typed API across the full toml-test corpus, which is a
+// much harder stress test than the handwritten unit tests:
+//   • valid sweep  — every valid file must not produce ParseFailed
+//   • invalid sweep — every invalid file must produce ParseFailed (not MissingField
+//     or TypeMismatch, which would mean the file parsed silently)
+//
+// We use an empty struct `struct {}` so mapTable immediately returns without
+// field iteration — the goal is not to verify field values here but to verify
+// that the temp-arena allocation/teardown inside parseInto is correct for all
+// 215 valid inputs and that error propagation is correct for all 467 invalid
+// inputs.  A separate test below verifies actual field values on a real file.
+
+fn runParseIntoValidSweep() !void {
+    const Empty = struct {};
+    const gpa = std.testing.allocator;
+    var lines = std.mem.tokenizeScalar(u8, manifest, '\n');
+    var checked: usize = 0;
+    var failures: usize = 0;
+
+    while (lines.next()) |raw_line| {
+        const entry = std.mem.trim(u8, raw_line, " \t\r");
+        if (entry.len == 0 or !std.mem.endsWith(u8, entry, ".toml")) continue;
+        if (!std.mem.startsWith(u8, entry, "valid/")) continue;
+        checked += 1;
+
+        const path = try std.fs.path.join(gpa, &.{ "test", entry });
+        defer gpa.free(path);
+
+        const src = try readTestFile(gpa, path);
+        defer gpa.free(src);
+
+        var err: toml.ErrorInfo = .{};
+        _ = toml.parseInto(Empty, gpa, src, &err) catch |e| {
+            if (e == error.OutOfMemory) return e;
+            // MissingField / TypeMismatch are fine — we have no fields.
+            // ParseFailed on a valid file is a real failure.
+            if (e == error.ParseFailed) {
+                failures += 1;
+                if (failures <= max_reported_failures) {
+                    std.debug.print(
+                        "\nparseInto valid sweep: ParseFailed on {s} at {d}:{d}: {s}\n",
+                        .{ entry, err.line, err.col, err.message() },
+                    );
+                }
+            }
+        };
+    }
+
+    if (failures != 0) {
+        std.debug.print(
+            "\nparseInto valid sweep: checked={d}, failures={d}\n",
+            .{ checked, failures },
+        );
+        return error.TestUnexpectedResult;
+    }
+}
+
+fn runParseIntoInvalidSweep() !void {
+    const Empty = struct {};
+    const gpa = std.testing.allocator;
+    var lines = std.mem.tokenizeScalar(u8, manifest, '\n');
+    var checked: usize = 0;
+    var failures: usize = 0;
+
+    while (lines.next()) |raw_line| {
+        const entry = std.mem.trim(u8, raw_line, " \t\r");
+        if (entry.len == 0 or !std.mem.endsWith(u8, entry, ".toml")) continue;
+        if (!std.mem.startsWith(u8, entry, "invalid/")) continue;
+        checked += 1;
+
+        const path = try std.fs.path.join(gpa, &.{ "test", entry });
+        defer gpa.free(path);
+
+        const src = try readTestFile(gpa, path);
+        defer gpa.free(src);
+
+        var err: toml.ErrorInfo = .{};
+        if (toml.parseInto(Empty, gpa, src, &err)) |_| {
+            // Parsed successfully — invalid file was not rejected.
+            failures += 1;
+            if (failures <= max_reported_failures) {
+                std.debug.print("\nparseInto invalid sweep: unexpectedly succeeded on {s}\n", .{entry});
+            }
+        } else |e| switch (e) {
+            error.ParseFailed => {}, // correct
+            error.MissingField, error.TypeMismatch => {
+                // These come from the mapping layer, not the parser, which
+                // means the invalid TOML was parsed without error.  That is a
+                // parser bug — same failure class as above.
+                failures += 1;
+                if (failures <= max_reported_failures) {
+                    std.debug.print(
+                        "\nparseInto invalid sweep: {s} on invalid file {s} (parser should have rejected it)\n",
+                        .{ @errorName(e), entry },
+                    );
+                }
+            },
+            error.OutOfMemory => return e,
+        }
+    }
+
+    if (failures != 0) {
+        std.debug.print(
+            "\nparseInto invalid sweep: checked={d}, failures={d}\n",
+            .{ checked, failures },
+        );
+        return error.TestUnexpectedResult;
+    }
+}
+
+test "parseInto valid corpus: no ParseFailed on any valid file" {
+    try runParseIntoValidSweep();
+}
+
+test "parseInto invalid corpus: ParseFailed on every invalid file" {
+    try runParseIntoInvalidSweep();
+}
+
+// ─── parseInto corpus fixture: spec-example-1 ────────────────────────────────
+//
+// Maps the canonical TOML spec example from disk onto a precisely-typed struct
+// and asserts every field value.  This exercises the full mapping layer —
+// nested structs, slices, OffsetDateTime, bool — against a real corpus file.
+
+test "parseInto corpus fixture: spec-example-1 fields are correct" {
+    const ServerInfo = struct { ip: []const u8, dc: []const u8 };
+    const Servers = struct { alpha: ServerInfo, beta: ServerInfo };
+    const Database = struct {
+        server: []const u8,
+        ports: []i64,
+        connection_max: i64,
+        enabled: bool,
+    };
+    const Owner = struct {
+        name: []const u8,
+        dob: toml.OffsetDateTime,
+    };
+    const Config = struct {
+        title: []const u8,
+        owner: Owner,
+        database: Database,
+        servers: Servers,
+        // clients.data is a mixed-type nested array — not mappable to a typed
+        // slice, so we skip it by making the whole section optional.
+        clients: ?struct { hosts: [][]const u8 } = null,
+    };
+
+    const gpa = std.testing.allocator;
+    const src = try readTestFile(gpa, "test/valid/spec-example-1.toml");
+    defer gpa.free(src);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var err: toml.ErrorInfo = .{};
+    const cfg = toml.parseInto(Config, arena.allocator(), src, &err) catch |e| {
+        std.debug.print("parseInto failed at {d}:{d}: {s}\n", .{ err.line, err.col, err.message() });
+        return e;
+    };
+
+    try std.testing.expectEqualStrings("TOML Example", cfg.title);
+
+    try std.testing.expectEqualStrings("Lance Uppercut", cfg.owner.name);
+    try std.testing.expectEqual(@as(u16, 1979), cfg.owner.dob.date.year);
+    try std.testing.expectEqual(@as(u8, 5), cfg.owner.dob.date.month);
+    try std.testing.expectEqual(@as(u8, 27), cfg.owner.dob.date.day);
+    try std.testing.expectEqual(@as(i16, -8 * 60), cfg.owner.dob.offset_minutes);
+
+    try std.testing.expectEqualStrings("192.168.1.1", cfg.database.server);
+    try std.testing.expectEqual(@as(usize, 3), cfg.database.ports.len);
+    try std.testing.expectEqual(@as(i64, 8001), cfg.database.ports[0]);
+    try std.testing.expectEqual(@as(i64, 8002), cfg.database.ports[2]);
+    try std.testing.expectEqual(@as(i64, 5000), cfg.database.connection_max);
+    try std.testing.expectEqual(true, cfg.database.enabled);
+
+    try std.testing.expectEqualStrings("10.0.0.1", cfg.servers.alpha.ip);
+    try std.testing.expectEqualStrings("eqdc10", cfg.servers.alpha.dc);
+    try std.testing.expectEqualStrings("10.0.0.2", cfg.servers.beta.ip);
+}

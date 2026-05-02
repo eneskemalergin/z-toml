@@ -6,7 +6,7 @@
 <h1 align="center">z-toml</h1>
 
 <p align="center">
-  TOML v1.1.0 parser for Zig 0.16. Single-pass, no dependencies, corpus-validated.
+  TOML v1.1.0 parser for Zig 0.16. Single-pass, no dependencies, corpus-validated. Typed and dynamic APIs.
 </p>
 
 <p align="center">
@@ -22,6 +22,8 @@
 
 - Single-pass recursive-descent. No intermediate AST.
 - Full TOML 1.1.0 coverage: all value types, dotted keys, inline tables, arrays of tables, multi-line strings, escape sequences, date/time types
+- `parseInto(T)`: map TOML directly onto a Zig struct with comptime reflection. No manual tree walking.
+- `parseSlice`: dynamic tree API for unknown-shape documents
 - Validated against the [toml-lang/toml-test](https://github.com/toml-lang/toml-test) corpus (215 valid + 467 invalid files)
 - Clear error messages with line and column numbers
 - No dependencies beyond the Zig standard library
@@ -37,7 +39,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .z_toml = .{
-        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.0.tar.gz",
+        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.1.tar.gz",
         .hash = "<run zig fetch to get the hash>",
     },
 },
@@ -46,7 +48,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 Or use `zig fetch` to add it automatically:
 
 ```sh
-zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.0.tar.gz
+zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.1.tar.gz
 ```
 
 Then wire it up in your `build.zig`:
@@ -60,6 +62,49 @@ exe.root_module.addImport("toml", z_toml.module("toml"));
 ```
 
 ## Quick start
+
+### Typed API (`parseInto`)
+
+The simplest way to read a config file. Define a struct and let the library fill it in.
+
+```zig
+const std = @import("std");
+const toml = @import("toml");
+
+const Database = struct { host: []const u8, port: u16 };
+const Config = struct {
+    title: []const u8,
+    database: Database,
+    retries: u8 = 3, // default used when key is absent
+    tags: ?[][]const u8 = null, // null when key is absent
+};
+
+pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    const src =
+        \\title = "My App"
+        \\[database]
+        \\host = "localhost"
+        \\port = 5432
+    ;
+
+    var err: toml.ErrorInfo = .{};
+    const cfg = toml.parseInto(Config, arena.allocator(), src, &err) catch |e| {
+        std.debug.print("parse error at {d}:{d}: {s}\n",
+            .{ err.line, err.col, err.message() });
+        return e;
+    };
+
+    std.debug.print("{s} on {s}:{d}\n",
+        .{ cfg.title, cfg.database.host, cfg.database.port });
+}
+```
+
+### Dynamic API (`parseSlice`)
+
+Use this when the TOML shape is not known at compile time.
 
 ```zig
 const std = @import("std");
@@ -83,18 +128,47 @@ pub fn main() !void {
             .{ err.line, err.col, err.message() });
         return e;
     };
-    // root is *toml.Table, a string-keyed ordered hash map.
-    // Free with toml.deinit(root, gpa), or just deinit the arena.
+    // root is *toml.Table. Free with toml.deinit(root, gpa) or deinit the arena.
 
-    const title = root.get("title").?.string;        // "My App"
-    const port  = root.get("database").?.table
-                      .get("port").?.integer;         // 5432
+    const title = root.get("title").?.string;
+    const port  = root.get("database").?.table.get("port").?.integer;
     _ = title;
     _ = port;
 }
 ```
 
 ## API
+
+### `parseInto`
+
+```zig
+pub fn parseInto(
+    comptime T: type,
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+) ParseIntoError!T
+```
+
+Parses `input` and maps the root table onto a value of type `T` using comptime reflection. `T` must be a struct. Field names must match TOML keys exactly.
+
+Supported field types:
+
+| Zig field type | Maps from |
+| --- | --- |
+| `bool` | TOML boolean |
+| integers (`i8`..`i64`, `u8`..`u64`, ...) | TOML integer, range-checked |
+| `f32`, `f64` | TOML float; TOML integer is promoted silently |
+| `[]const u8` | TOML string (gpa-owned copy) |
+| `[]T` | TOML array |
+| struct | TOML table (nested) |
+| `?T` | value when present, `null` when the key is absent |
+| enum | TOML string matched by variant name |
+| `LocalDate`, `LocalTime`, `LocalDateTime`, `OffsetDateTime` | TOML datetime types |
+
+Fields with a Zig default value use that default when the key is absent. Fields without a default and without `?` return `error.MissingField` when absent. Extra TOML keys not present in the struct are silently ignored.
+
+Returns `error.ParseFailed` for invalid TOML, `error.MissingField` for a required absent key, `error.TypeMismatch` for a wrong TOML type or out-of-range integer.
 
 ### `parseSlice`
 
@@ -177,7 +251,7 @@ Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that 
 zig build test
 ```
 
-Runs 29 unit tests plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files).
+Runs 55 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
 ## Build steps
 
@@ -186,6 +260,14 @@ Runs 29 unit tests plus the full toml-lang/toml-test corpus (215 valid + 467 inv
 | `zig build test`       | Run all unit tests and the toml-test corpus           |
 | `zig build example`    | Parse `examples/example.toml` → JSON to stdout        |
 | `zig build proteomics` | Parse `examples/proteomics.toml` → color-coded report |
+
+## Roadmap
+
+| Version | Feature | Status |
+| ------- | ------- | ------ |
+| **v0.1.1** | `parseInto(T)` typed parser | Shipped |
+| **v0.2** | Serialization | Write a Zig struct or `Value` tree back to a `.toml` file. |
+| **v0.3** | Zero-copy strings | Return `[]const u8` slices into the input buffer instead of allocating copies. Requires keeping the input alive for the lifetime of the result. |
 
 ## References
 

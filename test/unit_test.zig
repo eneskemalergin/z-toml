@@ -376,8 +376,7 @@ test "proteomics.toml parses successfully" {
     const jobs = cluster.get("jobs").?.array;
     try std.testing.expectEqual(@as(usize, 4), jobs.items.len);
     try std.testing.expectEqualStrings("database_search", jobs.items[0].table.get("name").?.string);
-    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC",
-        jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
+    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC", jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
 
     // Pipeline array of tables
     const pipeline = root.get("pipeline").?.array;
@@ -398,4 +397,297 @@ test "proteomics.toml parses successfully" {
     // Enrichment
     const enrich = root.get("enrichment").?.table;
     try std.testing.expectEqual(@as(usize, 7), enrich.get("databases").?.array.items.len);
+}
+
+// ─── parseInto tests ─────────────────────────────────────────────────────────
+
+test "parseInto: flat struct with all scalar types" {
+    const Config = struct {
+        title: []const u8,
+        port: u16,
+        debug: bool,
+        ratio: f64,
+    };
+    const src =
+        \\title = "My App"
+        \\port = 8080
+        \\debug = true
+        \\ratio = 0.5
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), src, null);
+    try std.testing.expectEqualStrings("My App", cfg.title);
+    try std.testing.expectEqual(@as(u16, 8080), cfg.port);
+    try std.testing.expectEqual(true, cfg.debug);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.5), cfg.ratio, 1e-10);
+}
+
+test "parseInto: signed integers including negative values" {
+    const Config = struct { delta: i32, temp: i8 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "delta = -300\ntemp = -42", null);
+    try std.testing.expectEqual(@as(i32, -300), cfg.delta);
+    try std.testing.expectEqual(@as(i8, -42), cfg.temp);
+}
+
+test "parseInto: f32 field uses floatCast" {
+    const Config = struct { x: f32 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "x = 1.5", null);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), cfg.x, 1e-6);
+}
+
+test "parseInto: integer promoted to float" {
+    const Config = struct { ratio: f64 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "ratio = 2", null);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.0), cfg.ratio, 1e-10);
+}
+
+test "parseInto: optional field absent yields null" {
+    const Config = struct {
+        name: []const u8,
+        timeout: ?u32,
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "name = \"z-toml\"", null);
+    try std.testing.expectEqualStrings("z-toml", cfg.name);
+    try std.testing.expectEqual(@as(?u32, null), cfg.timeout);
+}
+
+test "parseInto: optional nested struct absent yields null" {
+    const Database = struct { host: []const u8, port: u16 };
+    const Config = struct { database: ?Database };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // No [database] section at all — must produce null, not MissingField.
+    const cfg = try toml.parseInto(Config, arena.allocator(), "", null);
+    try std.testing.expectEqual(@as(?Database, null), cfg.database);
+}
+
+test "parseInto: default value used when key absent" {
+    const Config = struct { retries: u8 = 3 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "", null);
+    try std.testing.expectEqual(@as(u8, 3), cfg.retries);
+}
+
+test "parseInto: nested struct maps to table" {
+    const Database = struct { host: []const u8, port: u16 };
+    const Config = struct { database: Database };
+    const src =
+        \\[database]
+        \\host = "localhost"
+        \\port = 5432
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), src, null);
+    try std.testing.expectEqualStrings("localhost", cfg.database.host);
+    try std.testing.expectEqual(@as(u16, 5432), cfg.database.port);
+}
+
+test "parseInto: dotted key builds nested struct" {
+    // dotted keys go through a different code path in the dynamic parser
+    // (DottedKey path) but should produce the same *Table result.
+    const Server = struct { host: []const u8, port: u16 };
+    const Config = struct { server: Server };
+    const src =
+        \\server.host = "example.com"
+        \\server.port = 443
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), src, null);
+    try std.testing.expectEqualStrings("example.com", cfg.server.host);
+    try std.testing.expectEqual(@as(u16, 443), cfg.server.port);
+}
+
+test "parseInto: array-of-tables maps to slice of structs" {
+    // [[header]] is the most common real-world use case; it goes through the
+    // AOT code path in the parser and must map correctly to []Struct.
+    const Server = struct { host: []const u8, port: u16 };
+    const Config = struct { servers: []Server };
+    const src =
+        \\[[servers]]
+        \\host = "a.example.com"
+        \\port = 8001
+        \\
+        \\[[servers]]
+        \\host = "b.example.com"
+        \\port = 8002
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), src, null);
+    try std.testing.expectEqual(@as(usize, 2), cfg.servers.len);
+    try std.testing.expectEqualStrings("a.example.com", cfg.servers[0].host);
+    try std.testing.expectEqual(@as(u16, 8001), cfg.servers[0].port);
+    try std.testing.expectEqualStrings("b.example.com", cfg.servers[1].host);
+    try std.testing.expectEqual(@as(u16, 8002), cfg.servers[1].port);
+}
+
+test "parseInto: slice of integers" {
+    const Config = struct { ports: []u16 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "ports = [80, 443, 8080]", null);
+    try std.testing.expectEqual(@as(usize, 3), cfg.ports.len);
+    try std.testing.expectEqual(@as(u16, 80), cfg.ports[0]);
+    try std.testing.expectEqual(@as(u16, 8080), cfg.ports[2]);
+}
+
+test "parseInto: empty array produces zero-length slice" {
+    const Config = struct { tags: [][]const u8 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "tags = []", null);
+    try std.testing.expectEqual(@as(usize, 0), cfg.tags.len);
+}
+
+test "parseInto: slice of strings" {
+    const Config = struct { tags: [][]const u8 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "tags = [\"zig\", \"toml\", \"fast\"]", null);
+    try std.testing.expectEqual(@as(usize, 3), cfg.tags.len);
+    try std.testing.expectEqualStrings("zig", cfg.tags[0]);
+    try std.testing.expectEqualStrings("fast", cfg.tags[2]);
+}
+
+test "parseInto: enum field maps from string" {
+    const Level = enum { debug, info, warn, err };
+    const Config = struct { log_level: Level };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "log_level = \"warn\"", null);
+    try std.testing.expectEqual(Level.warn, cfg.log_level);
+}
+
+test "parseInto: extra TOML keys not in struct are silently ignored" {
+    const Config = struct { port: u16 };
+    const src =
+        \\port = 9000
+        \\extra_key = "should be ignored"
+        \\[section_not_in_struct]
+        \\x = 1
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), src, null);
+    try std.testing.expectEqual(@as(u16, 9000), cfg.port);
+}
+
+// ── Error path tests ──────────────────────────────────────────────────────────
+
+test "parseInto: invalid TOML propagates ParseFailed" {
+    const Config = struct { x: u32 };
+    var err: toml.ErrorInfo = .{};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const result = toml.parseInto(Config, arena.allocator(), "x = !!bad", &err);
+    try std.testing.expectError(error.ParseFailed, result);
+    // err_info must be populated with a location
+    try std.testing.expect(err.line >= 1);
+}
+
+test "parseInto: missing required field returns MissingField" {
+    const Config = struct { required: u32 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.MissingField,
+        toml.parseInto(Config, arena.allocator(), "", null),
+    );
+}
+
+test "parseInto: type mismatch string-for-integer returns TypeMismatch" {
+    const Config = struct { count: u32 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "count = \"not a number\"", null),
+    );
+}
+
+test "parseInto: type mismatch bool-for-integer returns TypeMismatch" {
+    const Config = struct { count: u32 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "count = true", null),
+    );
+}
+
+test "parseInto: type mismatch table-for-scalar returns TypeMismatch" {
+    // A [port] section exists but the field expects a u16.
+    const Config = struct { port: u16 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "[port]\nx = 1", null),
+    );
+}
+
+test "parseInto: integer positive overflow returns TypeMismatch" {
+    const Config = struct { small: u8 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "small = 300", null),
+    );
+}
+
+test "parseInto: negative integer into unsigned returns TypeMismatch" {
+    const Config = struct { count: u32 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "count = -1", null),
+    );
+}
+
+test "parseInto: enum unknown variant returns TypeMismatch" {
+    const Level = enum { debug, info, warn, err };
+    const Config = struct { log_level: Level };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "log_level = \"trace\"", null),
+    );
 }
