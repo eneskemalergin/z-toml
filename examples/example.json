@@ -1,0 +1,100 @@
+{
+  "title": {
+    "type": "string",
+    "value": "Observatory Snapshot"
+  },
+  "enabled": {
+    "type": "bool",
+    "value": "true"
+  },
+  "sample_rate": {
+    "type": "float",
+    "value": "0.125"
+  },
+  "captured_at": {
+    "type": "datetime",
+    "value": "2026-05-02T19:45:12Z"
+  },
+  "location": {
+    "site": {
+      "type": "string",
+      "value": "ridge-17"
+    },
+    "elevation_m": {
+      "type": "integer",
+      "value": "1420"
+    },
+    "coordinates": {
+      "lat": {
+        "type": "float",
+        "value": "39.7392"
+      },
+      "lon": {
+        "type": "float",
+        "value": "-104.9903"
+      }
+    }
+  },
+  "thresholds": {
+    "warning": {
+      "type": "integer",
+      "value": "12"
+    },
+    "critical": {
+      "type": "integer",
+      "value": "18"
+    }
+  },
+  "events": [
+    {
+      "id": {
+        "type": "integer",
+        "value": "1"
+      },
+      "kind": {
+        "type": "string",
+        "value": "calibration"
+      },
+      "tags": [
+        {
+          "type": "string",
+          "value": "startup"
+        },
+        {
+          "type": "string",
+          "value": "baseline"
+        }
+      ]
+    },
+    {
+      "id": {
+        "type": "integer",
+        "value": "2"
+      },
+      "kind": {
+        "type": "string",
+        "value": "observation"
+      },
+      "tags": [
+        {
+          "type": "string",
+          "value": "cloud-gap"
+        },
+        {
+          "type": "string",
+          "value": "northern-sky"
+        }
+      ]
+    }
+  ],
+  "window": {
+    "opened": {
+      "type": "time-local",
+      "value": "19:30:00"
+    },
+    "closed": {
+      "type": "time-local",
+      "value": "21:00:00"
+    }
+  }
+}

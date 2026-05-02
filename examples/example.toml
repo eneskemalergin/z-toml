@@ -1,0 +1,27 @@
+title = "Observatory Snapshot"
+enabled = true
+sample_rate = 0.125
+captured_at = 2026-05-02T19:45:12Z
+
+[location]
+site = "ridge-17"
+elevation_m = 1420
+coordinates = { lat = 39.7392, lon = -104.9903 }
+
+[thresholds]
+warning = 12
+critical = 18
+
+[[events]]
+id = 1
+kind = "calibration"
+tags = ["startup", "baseline"]
+
+[[events]]
+id = 2
+kind = "observation"
+tags = ["cloud-gap", "northern-sky"]
+
+[window]
+opened = 19:30:00
+closed = 21:00:00
