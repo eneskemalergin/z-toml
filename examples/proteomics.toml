@@ -1,0 +1,678 @@
+# Proteomics Bioinformatics Analysis Configuration
+# Demonstrates the full TOML v1.1.0 feature set in a realistic
+# quantitative proteomics context.
+#
+# Feature index
+# ---------------------------------------------------------------------------
+#  * Bare keys, quoted keys, dotted keys
+#  * Basic strings with escape sequences
+#  *   (\b \t \n \f \r \e \\ \" \xNN \uNNNN \UNNNNNNNN)
+#  * Multi-line basic strings  (""" ... """)
+#  * Literal strings           (' ... ')
+#  * Multi-line literal strings (''' ... ''')
+#  * Integers: decimal, hex (0x), octal (0o), binary (0b), underscores
+#  * Floats: standard, exponent, inf, +inf, -inf, nan
+#  * Booleans
+#  * Offset datetime, local datetime, local date, local time
+#  * Arrays (homogeneous, nested, trailing comma)
+#  * Inline tables (single-line and multi-line per TOML 1.1.0)
+#  * Tables with [header] and dotted super-table navigation
+#  * Array of tables [[aot]]
+#  * Quoted keys in headers and key assignments
+# ===========================================================================
+
+
+# ===========================================================================
+# STUDY METADATA
+# ===========================================================================
+
+title = "Quantitative Proteomics: Cellular Response to Thermal Stress"
+
+# Multi-line basic string — backslash line-ending trims whitespace
+description = """\
+Multi-dimensional proteomics analysis investigating protein abundance \
+changes in a human embryonic kidney cell line subjected to gradual \
+thermal stress (37\u00B0C \u2192 42\u00B0C \u2192 45\u00B0C) over 24 h. \
+Quantification uses an 18-plex isobaric labelling reagent.\
+"""
+
+# Multi-line literal string (no escape processing)
+notes = '''
+Raw files : /data/raw/*.raw
+Processed : /data/processed/
+Archive   : /data/archive/2025-Q1/
+NOTE: \t and \n are NOT escape sequences inside literal strings.
+'''
+
+# Quoted keys at root level demonstrating special characters in key names
+"study-id"   = "PROT-2025-0042"
+"schema_ver" = "1.1.0"
+
+# All four datetime types
+study_start_date      = 2025-01-15
+study_end_date        = 2025-03-22
+data_collection_start = 2025-01-15T08:30:00
+data_collection_end   = 2025-03-22T17:45:00Z
+last_updated          = 2025-04-01T14:22:33.123456789-05:00
+analysis_timestamp    = 2025-04-02 09:15:00+00:00
+daily_run_time        = 08:30:00.500
+
+version      = "2.1.0-beta"
+is_published = false
+is_clinical  = true
+
+
+# ===========================================================================
+# SAMPLE INFORMATION
+# ===========================================================================
+
+[samples]
+
+  # Integer formats
+  total_samples         = 96
+  biological_replicates = 0x18        # hex  (= 24)
+  technical_replicates  = 0o4         # oct  (= 4)
+  control_group_mask    = 0b11000000  # bin  (bits 6-7 set = 6 control samples)
+  plate_capacity        = 384
+  well_volume_nl        = 50_000      # underscore separator
+
+  # Float variety
+  target_mass_accuracy    = 3.14e-6
+  min_peptide_probability = 0.95
+  default_rt_window       = +1.5
+  max_charge_state        = -1.0e2
+  special_threshold       = inf
+  negative_inf_example    = -inf
+  positive_inf_example    = +inf
+  undefined_metric        = nan
+
+  [samples.groups]
+
+    [[samples.groups.conditions]]
+      name        = "Control_37C"
+      temperature = 37.0
+      duration_h  = 24
+      sample_ids  = [1, 2, 3, 4, 5, 6, 7, 8]
+
+    [[samples.groups.conditions]]
+      name        = "Heat_42C"
+      temperature = 42.0
+      duration_h  = 24
+      sample_ids  = [9, 10, 11, 12, 13, 14, 15, 16]
+
+    [[samples.groups.conditions]]
+      name        = "Heat_45C"
+      temperature = 45.0
+      duration_h  = 24
+      sample_ids  = [17, 18, 19, 20, 21, 22, 23, 24]
+
+  [samples.metadata]
+    organism    = "Homo sapiens"
+    tissue      = "Embryonic kidney"
+    cell_line   = "HEK293T"
+    taxonomy_id = 9606
+
+    [samples.metadata.culturing]
+      media       = "DMEM"
+      serum       = "FBS 10%"
+      co2_percent = 5.0
+      humidity    = 95.0
+
+    [samples.metadata.passage]
+      number  = 12
+      frozen  = 2025-01-10
+      revived = 2025-01-14T09:00:00
+
+
+# ===========================================================================
+# INSTRUMENT CONFIGURATION
+# ===========================================================================
+
+[instrument]
+  vendor        = "Generic Scientific Instruments"
+  model         = "OrbiHigh-X"
+  serial_number = "OHX-20250042"
+
+  [instrument.settings]
+    acquisition_modes = ["DDA", "DIA", "PRM"]
+    enabled_scans     = ["MS1", "MS2", "MS3"]
+
+    # Array of arrays (nested)
+    mz_ranges = [
+      [400.0, 1200.0],
+      [500.0, 1500.0],
+      [300.0,  900.0],
+    ]
+
+    # Mixed-type array (TOML 1.1.0 allows heterogeneous arrays)
+    calibration_params = [1, 2.5, "linear", true]
+
+    resolution         = 120_000
+    agc_target         = 4e5
+    max_injection_time = 50.0
+
+    # \x09 = HT (tab), \x0A = LF (newline) via hex escapes
+    acq_log_format = "RUN\x09{id}\x09{time}\x09ACQ={mode}\x0A"
+
+    [instrument.settings.ionization]
+      source         = "NSI"
+      spray_voltage  = 2.1e3
+      capillary_temp = 275.0
+      s_lens_rf      = 50.0
+
+    [instrument.settings.fragments]
+      collision_energy = 30.0
+      activation_type  = "HCD"
+      energy_ramp      = [25.0, 30.0, 35.0]
+
+    [instrument.settings.calibration]
+      enabled          = true
+      interval_hours   = 24
+      last_calibration = 2025-04-01T06:00:00Z
+      tolerance_ppm    = 1.0
+
+
+# ===========================================================================
+# DATABASE SEARCH PARAMETERS
+# ===========================================================================
+
+[database]
+  name         = "RefProteome_Human"
+  version      = "2025_01"
+  fasta_path   = '/data/databases/ref_human_2025_01.fasta'
+  decoy_prefix = "DECOY_"
+  contaminants = true
+
+  # Multi-line literal string — backslashes are literal, not escapes
+  description = '''
+RefProteome_Human: curated reference proteome for Homo sapiens.
+Reviewed entries only (Swiss-Prot tier), including canonical isoforms.
+Sequences sourced from public databases; version tag: 2025_01.
+Path convention: /data/databases/<name>_<YYYY>_<MM>.fasta
+  '''
+
+  [database.search]
+    enzyme               = "Trypsin"
+    max_missed_cleavages = 2
+    min_peptide_length   = 7
+    max_peptide_length   = 50
+
+    fixed_modifications = [
+      "Carbamidomethyl (C)",
+    ]
+
+    variable_modifications = [
+      "Oxidation (M)",
+      "Acetyl (Protein N-term)",
+      "Phospho (STY)",
+      "Methyl (K)",
+      "Deamidation (NQ)",
+    ]
+
+    precursor_tolerance = 10.0
+    fragment_tolerance  = 0.02
+    tolerance_units     = "ppm"
+
+    [database.search.scoring]
+      algorithm        = "Percolator"
+      fdr_threshold    = 0.01
+      validation_level = "peptide-level"
+      use_charge_state = true
+      use_delta_score  = true
+      use_rt_model     = true
+
+    [database.search.advanced]
+      open_search       = false
+      mass_offset_range = [-100.0, 100.0]
+      min_isotope_error = 0
+      max_isotope_error = 2
+
+
+# ===========================================================================
+# QUANTIFICATION
+# ===========================================================================
+
+[quantification]
+  method             = "TMTpro"
+  isobaric_reagent   = "TMTpro-18plex"
+  reporter_ion_range = [126.0, 131.0]
+  normalization      = "median"
+
+  [quantification.channels]
+    # Inline tables — single-line form
+    channel_126  = {name = "126C",  sample = "Control_37C_1", plex = 1}
+    channel_127N = {name = "127N",  sample = "Control_37C_2", plex = 2}
+    channel_127C = {name = "127C",  sample = "Control_37C_3", plex = 3}
+    channel_128N = {name = "128N",  sample = "Heat_42C_1",    plex = 4}
+    channel_128C = {name = "128C",  sample = "Heat_42C_2",    plex = 5}
+    channel_129N = {name = "129N",  sample = "Heat_42C_3",    plex = 6}
+    channel_129C = {name = "129C",  sample = "Heat_45C_1",    plex = 7}
+    channel_130N = {name = "130N",  sample = "Heat_45C_2",    plex = 8}
+    channel_130C = {name = "130C",  sample = "Heat_45C_3",    plex = 9}
+    channel_131N = {name = "131N",  sample = "Heat_45C_4",    plex = 10}
+    channel_131C = {name = "131C",  sample = "Heat_45C_5",    plex = 11}
+
+  [quantification.normalization_config]
+    method            = "trimmed_mean"
+    trim_percent      = 0.05
+    reference_channel = "channel_126"
+    apply_log2        = true
+
+  [quantification.imputation]
+    strategy  = "MinProb"
+    width     = 0.3
+    downshift = 1.8
+    seed      = 42
+
+
+# ===========================================================================
+# PROTEIN IDENTIFICATION
+# ===========================================================================
+
+[identification]
+  pipeline       = "FragSearch + PostProcess"
+  search_engines = ["FragSearch", "CoSearch", "TandemX"]
+
+  [identification.filters]
+    min_peptides_per_protein = 2
+    min_unique_peptides      = 1
+    max_q_value              = 0.01
+    remove_decoys            = true
+    remove_contaminants      = true
+    # Quoted keys demonstrate keys containing hyphens
+    "protein-groups"  = true
+    "shared-peptides" = false
+    "razor-peptides"  = true
+
+  [identification.post_processing]
+    protein_inference = "parsimony"
+    run_percolator    = true
+    run_crystal       = false
+    combine_channels  = true
+    # Dotted key assignment creates a sub-table inline
+    report.include_decoys       = false
+    report.include_contaminants = false
+    report.output_format        = "tsv"
+
+
+# ===========================================================================
+# RESULTS & OUTPUT
+# ===========================================================================
+
+[output]
+  base_directory       = "/data/projects/thermal_stress_2025/results"
+  create_timestamp_dir = true
+  formats              = ["tsv", "xlsx", "mzTab", "json"]
+
+  [output.files]
+    protein_matrix = "protein_quant_matrix.tsv"
+    peptide_matrix = "peptide_quant_matrix.tsv"
+    msstats_input  = "msstats_input.csv"
+    mztab          = "analysis_results.mzTab"
+    # \t=tab  \n=newline  \\=backslash  \e=ESC (TOML 1.1.0)  \x2D=hyphen
+    log_entry_format = "RESULT\t{protein}\t{fc:.4f}\t{pval:.2e}\n"
+    report_header    = "z\x2Dtoml analysis pipeline\e[0m"
+
+  [output.visualization]
+    generate_volcano = true
+    generate_heatmap = true
+    generate_pca     = true
+    generate_ma_plot = false
+    color_palette    = ["#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E"]
+    figure_dpi       = 300
+    export_format    = "png"
+    # Multi-line inline table (TOML 1.1.0 feature)
+    volcano_config = {
+      x_label     = "log2(Fold Change)",
+      y_label     = "-log10(adj. p-value)",
+      fc_cutoff   = 1.0,
+      pval_cutoff = 0.05,
+      point_size  = 2,
+      alpha       = 0.6,
+    }
+
+
+# ===========================================================================
+# QUALITY CONTROL
+# ===========================================================================
+
+[quality_control]
+  enabled        = true
+  min_ms1_signal = 1.0e4
+  min_ms2_peaks  = 10
+
+  [quality_control.metrics]
+    ms1_signal_to_noise    = 3.0
+    id_rate_percent        = 25.0
+    precursor_accuracy_ppm = 5.0
+    rt_deviation_minutes   = 1.5
+    # Multi-line inline table
+    passing_thresholds = {
+      id_rate      = 20.0,
+      qc_score     = 0.85,
+      completeness = 0.90,
+    }
+
+  [[quality_control.checks]]
+    name      = "Missing Values"
+    threshold = 0.30
+    action    = "flag"
+    severity  = "warning"
+
+  [[quality_control.checks]]
+    name       = "Outlier Samples"
+    threshold  = 3.0
+    action     = "review"
+    severity   = "error"
+    parameters = {method = "mahalanobis", alpha = 0.01}
+
+  [[quality_control.checks]]
+    name       = "Batch Effects"
+    threshold  = 0.15
+    action     = "correct"
+    severity   = "info"
+    parameters = {method = "combat", covariates = ["batch", "run_date"]}
+
+  [[quality_control.checks]]
+    name       = "Retention Time Drift"
+    threshold  = 2.0
+    action     = "recalibrate"
+    severity   = "warning"
+    parameters = {reference = "iRT", model = "linear", min_anchors = 10}
+
+
+# ===========================================================================
+# COMPUTATIONAL RESOURCES
+# ===========================================================================
+
+[computing]
+  max_memory_mb     = 128_000
+  threads           = 32
+  max_runtime_hours = 48
+  scratch_dir       = "/scratch/proteomics"
+
+  [computing.cluster]
+    scheduler = "SLURM"
+    partition = "highmem"
+    account   = "proteomics_lab"
+    qos       = "normal"
+
+    [[computing.cluster.jobs]]
+      name      = "database_search"
+      cpus      = 16
+      memory_gb = 64
+      walltime  = "24:00:00"
+      modules   = ["OpenJDK/11.0.2", "Python/3.11.0"]
+      [computing.cluster.jobs.environment]
+        JAVA_OPTS       = "-Xmx32g -XX:+UseG1GC"
+        OMP_NUM_THREADS = "16"
+        TMPDIR          = "/scratch/proteomics/tmp"
+
+    [[computing.cluster.jobs]]
+      name      = "quantification"
+      cpus      = 8
+      memory_gb = 32
+      walltime  = "12:00:00"
+      modules   = ["R/4.3.0", "OpenMS/3.0.0"]
+      [computing.cluster.jobs.environment]
+        R_LIBS_USER     = "/home/user/R/library"
+        OMP_NUM_THREADS = "8"
+
+    [[computing.cluster.jobs]]
+      name      = "differential_analysis"
+      cpus      = 4
+      memory_gb = 16
+      walltime  = "06:00:00"
+      modules   = ["Python/3.11.0", "NumPy/1.24.0", "SciPy/1.11.0"]
+      [computing.cluster.jobs.environment]
+        MATPLOTLIB_BACKEND = "Agg"
+        OMP_NUM_THREADS    = "4"
+
+    [[computing.cluster.jobs]]
+      name      = "enrichment"
+      cpus      = 2
+      memory_gb = 8
+      walltime  = "02:00:00"
+      modules   = ["R/4.3.0", "BiocManager/1.30.0"]
+      [computing.cluster.jobs.environment]
+        R_LIBS_USER     = "/home/user/R/library"
+        OMP_NUM_THREADS = "2"
+
+
+# ===========================================================================
+# DIFFERENTIAL EXPRESSION ANALYSIS
+# ===========================================================================
+
+[differential_expression]
+  tool              = "MSstats"
+  contrast          = "Heat_vs_Control"
+  adjustment_method = "BH"
+
+  [differential_expression.comparisons]
+
+    [[differential_expression.comparisons.pairs]]
+      name        = "42C_vs_37C"
+      condition_a = "Heat_42C"
+      condition_b = "Control_37C"
+      samples_a   = [9, 10, 11, 12, 13, 14, 15, 16]
+      samples_b   = [1,  2,  3,  4,  5,  6,  7,  8]
+
+    [[differential_expression.comparisons.pairs]]
+      name        = "45C_vs_37C"
+      condition_a = "Heat_45C"
+      condition_b = "Control_37C"
+      samples_a   = [17, 18, 19, 20, 21, 22, 23, 24]
+      samples_b   = [ 1,  2,  3,  4,  5,  6,  7,  8]
+
+    [[differential_expression.comparisons.pairs]]
+      name        = "45C_vs_42C"
+      condition_a = "Heat_45C"
+      condition_b = "Heat_42C"
+      samples_a   = [17, 18, 19, 20, 21, 22, 23, 24]
+      samples_b   = [ 9, 10, 11, 12, 13, 14, 15, 16]
+
+  [differential_expression.thresholds]
+    log2fc        = 1.0
+    adj_pval      = 0.05
+    min_intensity = 1.0e5
+
+  [differential_expression.model]
+    formula                  = "~ condition + run"
+    random_effect            = "subject"
+    missing_value_imputation = "survreg"
+
+
+# ===========================================================================
+# PATHWAY ENRICHMENT ANALYSIS
+# ===========================================================================
+
+[enrichment]
+  enabled    = true
+  background = "complete_proteome"
+
+  databases = [
+    "GO_Biological_Process",
+    "GO_Molecular_Function",
+    "GO_Cellular_Component",
+    "KEGG",
+    "Reactome",
+    "WikiPathways",
+    "MSigDB_Hallmarks",
+  ]
+
+  [enrichment.parameters]
+    significance_level = 0.05
+    min_gene_set_size  = 10
+    max_gene_set_size  = 500
+    correction_method  = "Bonferroni"
+    use_background_set = true
+    custom_gene_sets = [
+      "thermal_response_genes",
+      "heat_shock_proteins",
+      "chaperone_network",
+      "protein_folding_pathway",
+      "unfolded_protein_response",
+    ]
+
+  [enrichment.gsea]
+    n_permutations   = 1000
+    seed             = 20250101
+    min_set_fraction = 0.1
+    scoring_scheme   = "weighted"
+
+
+# ===========================================================================
+# ANNOTATION & METADATA
+# ===========================================================================
+
+[annotation]
+  uniprot_mapping          = true
+  add_gene_names           = true
+  add_protein_descriptions = true
+  add_subcellular_location = true
+
+  [annotation.sources]
+    uniprot_release  = "2025_01"
+    gene_ontology    = 2025-01-01
+    reactome_version = "89"
+    string_version   = "12.0"
+    # Multi-line inline table with synthetic example URLs
+    api_endpoints = {
+      uniprot = "https://rest.uniprot.example/api/v2",
+      string  = "https://string-db.example/api/v1",
+      biogrid = "https://webservice.biogrid.example/v3",
+    }
+
+  [annotation.custom_databases]
+    enabled = true
+    paths   = [
+      "/data/annotations/heat_shock_db.tsv",
+      "/data/annotations/chaperome_atlas.tsv",
+    ]
+
+
+# ===========================================================================
+# WORKFLOW PIPELINE
+# ===========================================================================
+
+[[pipeline]]
+  step   = 1
+  name   = "Raw Data Conversion"
+  tool   = "RawConverter"
+  input  = "*.raw"
+  output = "*.mzML"
+  parameters = {compression = true, precision = 64, peak_picking = "vendor"}
+
+[[pipeline]]
+  step   = 2
+  name   = "Database Search"
+  tool   = "FragSearch"
+  input  = "*.mzML"
+  output = "*.pin"
+  parameters = {
+    database      = "ref_human.fasta",
+    enzyme        = "trypsin",
+    precursor_tol = 10,
+    fragment_tol  = 20,
+    isotope_error = 2,
+  }
+
+[[pipeline]]
+  step   = 3
+  name   = "Post-Processing"
+  tool   = "PostProcessor"
+  input  = "*.pin"
+  output = "*.filtered.tsv"
+  parameters = {
+    fdr               = 0.01,
+    protein_inference = "parsimony",
+    run_percolator    = true,
+  }
+
+[[pipeline]]
+  step   = 4
+  name   = "Quantification"
+  tool   = "QuantKit"
+  input  = "*.filtered.tsv"
+  output = "protein_quant.tsv"
+  parameters = {
+    method        = "TMTpro",
+    normalization = "median",
+    sum_channels  = false,
+  }
+
+[[pipeline]]
+  step   = 5
+  name   = "Differential Analysis"
+  tool   = "StatAnalyzer"
+  input  = "protein_quant.tsv"
+  output = "diff_exp_results.tsv"
+  parameters = {
+    contrast         = "Heat_vs_Control",
+    adjustment       = "BH",
+    log2fc_threshold = 1.0,
+  }
+
+[[pipeline]]
+  step   = 6
+  name   = "Pathway Enrichment"
+  tool   = "PathwayRunner"
+  input  = "diff_exp_results.tsv"
+  output = "enrichment_results.tsv"
+  parameters = {
+    databases   = ["GO_BP", "KEGG", "Reactome"],
+    pval_cutoff = 0.05,
+    n_perm      = 1000,
+  }
+
+
+# ===========================================================================
+# COLLABORATORS & ACKNOWLEDGMENTS
+# ===========================================================================
+
+[collaborators]
+  pi        = "Dr. Alex Morgan"
+  analysts  = ["Jordan Lee", "Casey Kim", "Riley Patel"]
+  reviewers = ["Dr. Sam Torres", "Dr. Quinn Nakamura"]
+
+  [collaborators.institutions]
+    primary   = "Institute for Computational Biology"
+    secondary = ["State University", "General Hospital Research Center"]
+    funding   = ["GRANT-2025-BC-001234", "GRANT-2025-NS-567890"]
+
+  [collaborators.contact]
+    email   = "proteomics@icb.example.org"
+    website = "https://icb.example.org/morganlab"
+    orcid   = "0000-0002-XXXX-XXXX"
+
+
+# ===========================================================================
+# CUSTOM USER EXTENSIONS
+# Demonstrates quoted-key table headers and deep sub-table nesting.
+# ===========================================================================
+
+["user.custom-settings"]
+  enable_debug          = false
+  log_level             = "INFO"
+  cache_dir             = "/tmp/proteomics_cache"
+  experimental_features = ["new_scoring", "deep_learning_rt", "denovo_assist"]
+  # Multi-line inline table (TOML 1.1.0)
+  deep_learning = {
+    model_path = "/models/rt_predictor_v3.onnx",
+    device     = "cpu",
+    batch_size = 512,
+    fp16       = false,
+  }
+
+# ["user.custom-settings".nested] uses a quoted + bare dotted key path
+["user.custom-settings".nested]
+  key    = "value"
+  number = 42
+  bits   = 0b10101010
+  perms  = 0o755
+  magic  = 0xDEADBEEF
+
+["user.custom-settings".nested.deep]
+  level  = 3
+  active = true
+  tag    = "DEEP\u2193NESTED"

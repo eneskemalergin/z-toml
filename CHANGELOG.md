@@ -18,7 +18,8 @@ First public release.
 - Table state enforcement: inline tables cannot be extended after definition, explicitly defined tables cannot be reopened, dotted keys cannot traverse arrays of tables
 - Structured error info with line, column, and message on parse failure
 - Validated against the toml-lang/toml-test corpus: 215 valid files (semantic JSON comparison), 467 invalid files (all rejected)
-- 28 unit tests
+- 29 unit tests (28 feature tests + 1 complex integration test parsing a 678-line proteomics bioinformatics configuration covering every TOML 1.1.0 feature)
+- Two examples: `zig build example` (simple configuration) and `zig build proteomics` (sophisticated showcase)
 - `build.zig.zon` package manifest for the Zig package manager
 - MIT license
 

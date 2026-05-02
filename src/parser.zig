@@ -142,7 +142,7 @@ const Parser = struct {
             '\r' => if (self.peekAt(1) == '\n') {
                 self.advance();
                 self.advance();
-            } else break,
+            } else return self.fail("bare CR not allowed", .{}),
             '#' => try self.skipComment(),
             else => break,
         };
@@ -180,6 +180,18 @@ const Parser = struct {
             '\n' => true,
             '\r' => self.peekAt(1) == '\n',
             else => false,
+        };
+    }
+
+    fn eatNewline(self: *Parser) ParseError!void {
+        if (self.peek()) |c| switch (c) {
+            '\n' => self.advance(),
+            '\r' => {
+                self.advance();
+                if (self.peek() != '\n') return self.fail("bare CR not allowed", .{});
+                self.advance();
+            },
+            else => {},
         };
     }
 
@@ -661,14 +673,7 @@ const Parser = struct {
         var last_was_underscore = false;
 
         while (self.peek()) |c| {
-            const is_valid_digit = switch (base) {
-                16 => std.ascii.isHex(c),
-                8 => c >= '0' and c <= '7',
-                2 => c == '0' or c == '1',
-                else => false,
-            };
-
-            if (is_valid_digit) {
+            if (isBaseDigit(c, base)) {
                 saw_digit = true;
                 last_was_underscore = false;
                 self.advance();
@@ -678,13 +683,7 @@ const Parser = struct {
             if (c == '_') {
                 if (!saw_digit or last_was_underscore) return self.fail("invalid underscore in integer", .{});
                 const next = self.peekAt(1) orelse return self.fail("invalid underscore in integer", .{});
-                const next_is_valid = switch (base) {
-                    16 => std.ascii.isHex(next),
-                    8 => next >= '0' and next <= '7',
-                    2 => next == '0' or next == '1',
-                    else => false,
-                };
-                if (!next_is_valid) return self.fail("invalid underscore in integer", .{});
+                if (!isBaseDigit(next, base)) return self.fail("invalid underscore in integer", .{});
                 last_was_underscore = true;
                 self.advance();
                 continue;
@@ -709,15 +708,15 @@ const Parser = struct {
             if (self.peekAt(1) == 'X') return self.fail("uppercase hexadecimal prefix is not allowed", .{});
             if (self.peekAt(1) == 'x') {
                 if (has_sign) return self.fail("sign not allowed for hexadecimal integer", .{});
-                return self.parseHexInt();
+                return self.parsePrefixedInt(16, "0x");
             }
             if (self.peekAt(1) == 'o') {
                 if (has_sign) return self.fail("sign not allowed for octal integer", .{});
-                return self.parseOctInt();
+                return self.parsePrefixedInt(8, "0o");
             }
             if (self.peekAt(1) == 'b') {
                 if (has_sign) return self.fail("sign not allowed for binary integer", .{});
-                return self.parseBinInt();
+                return self.parsePrefixedInt(2, "0b");
             }
         }
 
@@ -754,18 +753,6 @@ const Parser = struct {
             if (s.len > 1 and s[0] == '0') return self.fail("leading zeros in integer", .{});
             return .{ .integer = std.fmt.parseInt(i64, numstr, 10) catch return self.fail("invalid integer '{s}'", .{numstr}) };
         }
-    }
-
-    fn parseHexInt(self: *Parser) ParseError!Value {
-        return self.parsePrefixedInt(16, "0x");
-    }
-
-    fn parseOctInt(self: *Parser) ParseError!Value {
-        return self.parsePrefixedInt(8, "0o");
-    }
-
-    fn parseBinInt(self: *Parser) ParseError!Value {
-        return self.parsePrefixedInt(2, "0b");
     }
 
     fn parseArray(self: *Parser) ParseError!Value {
@@ -1093,42 +1080,19 @@ const Parser = struct {
         if (!std.unicode.utf8ValidateSlice(self.input))
             return self.fail("document is not valid UTF-8", .{});
         while (true) {
-            self.skipInlineWs();
+            try self.skipTrivia();
             const c = self.peek() orelse break;
             switch (c) {
-                '\n' => self.advance(),
-                '\r' => {
-                    if (self.peekAt(1) != '\n') return self.fail("bare CR not allowed", .{});
-                    self.advance();
-                    self.advance();
-                },
-                '#' => {
-                    try self.skipComment();
-                    if (self.peek() == '\r') {
-                        if (self.peekAt(1) != '\n') return self.fail("bare CR not allowed", .{});
-                        self.advance();
-                    }
-                    _ = self.eat('\n');
-                },
                 '[' => if (self.peekAt(1) == '[') try self.parseAOTHeader() else try self.parseTableHeader(),
                 else => {
                     try self.parseKeyVal();
                     self.skipInlineWs();
                     const next = self.peek() orelse break;
                     switch (next) {
-                        '\n' => self.advance(),
-                        '\r' => {
-                            if (self.peekAt(1) != '\n') return self.fail("bare CR not allowed", .{});
-                            self.advance();
-                            self.advance();
-                        },
+                        '\n', '\r' => try self.eatNewline(),
                         '#' => {
                             try self.skipComment();
-                            if (self.peek() == '\r') {
-                                if (self.peekAt(1) != '\n') return self.fail("bare CR not allowed", .{});
-                                self.advance();
-                            }
-                            _ = self.eat('\n');
+                            try self.eatNewline();
                         },
                         else => return self.fail("expected newline after key/value pair, found '{c}'", .{self.peek().?}),
                     }
@@ -1140,6 +1104,15 @@ const Parser = struct {
 
 inline fn isDigit(c: ?u8) bool {
     return if (c) |ch| ch >= '0' and ch <= '9' else false;
+}
+
+inline fn isBaseDigit(c: u8, base: u8) bool {
+    return switch (base) {
+        16 => std.ascii.isHex(c),
+        8 => c >= '0' and c <= '7',
+        2 => c == '0' or c == '1',
+        else => false,
+    };
 }
 
 fn isLeapYear(year: u32) bool {

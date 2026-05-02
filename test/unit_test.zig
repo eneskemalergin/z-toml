@@ -295,3 +295,107 @@ test "example file: spec-example-1.toml" {
     defer toml.deinit(root, gpa);
     try std.testing.expect(root.count() > 0);
 }
+
+test "proteomics.toml parses successfully" {
+    const gpa = std.testing.allocator;
+    const src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "examples/proteomics.toml", gpa, .limited(std.math.maxInt(usize)));
+    defer gpa.free(src);
+
+    var err: toml.ErrorInfo = .{};
+    const root = toml.parseSlice(gpa, src, &err) catch |e| {
+        std.debug.print("\nparse error line={d} col={d}: {s}\n", .{ err.line, err.col, err.message() });
+        return e;
+    };
+    defer toml.deinit(root, gpa);
+
+    // Verify root-level key count
+    try std.testing.expect(root.count() >= 10);
+
+    // Study metadata
+    try std.testing.expectEqualStrings("PROT-2025-0042", root.get("study-id").?.string);
+    try std.testing.expectEqual(true, root.get("is_clinical").?.boolean);
+
+    // Samples — integer formats
+    const samples = root.get("samples").?.table;
+    try std.testing.expectEqual(@as(i64, 96), samples.get("total_samples").?.integer);
+    try std.testing.expectEqual(@as(i64, 24), samples.get("biological_replicates").?.integer); // 0x18
+    try std.testing.expectEqual(@as(i64, 0b11000000), samples.get("control_group_mask").?.integer);
+
+    // Float specials
+    try std.testing.expect(std.math.isInf(samples.get("special_threshold").?.float));
+    try std.testing.expect(std.math.isNan(samples.get("undefined_metric").?.float));
+
+    // Conditions — array of tables
+    const groups = samples.get("groups").?.table;
+    const conditions = groups.get("conditions").?.array;
+    try std.testing.expectEqual(@as(usize, 3), conditions.items.len);
+    try std.testing.expectEqualStrings("Control_37C", conditions.items[0].table.get("name").?.string);
+
+    // Instrument — nested settings
+    const instrument = root.get("instrument").?.table;
+    const inst_settings = instrument.get("settings").?.table;
+    try std.testing.expectEqual(@as(i64, 120000), inst_settings.get("resolution").?.integer);
+
+    // Ionization sub-table
+    const ionization = inst_settings.get("ionization").?.table;
+    try std.testing.expectEqualStrings("NSI", ionization.get("source").?.string);
+
+    // Nested array-of-arrays (mz_ranges)
+    const mz_ranges = inst_settings.get("mz_ranges").?.array;
+    try std.testing.expectEqual(@as(usize, 3), mz_ranges.items.len);
+    try std.testing.expectEqual(@as(usize, 2), mz_ranges.items[0].array.items.len);
+
+    // Database search
+    const db = root.get("database").?.table;
+    const db_search = db.get("search").?.table;
+    try std.testing.expectEqualStrings("Trypsin", db_search.get("enzyme").?.string);
+    try std.testing.expectEqual(@as(usize, 5), db_search.get("variable_modifications").?.array.items.len);
+
+    // Quantification channels — inline tables
+    const quant = root.get("quantification").?.table;
+    const q_channels = quant.get("channels").?.table;
+    try std.testing.expect(q_channels.count() >= 10);
+    try std.testing.expectEqualStrings("126C", q_channels.get("channel_126").?.table.get("name").?.string);
+
+    // Identification filters — quoted keys with hyphens
+    const ident = root.get("identification").?.table;
+    const ident_filters = ident.get("filters").?.table;
+    try std.testing.expectEqual(true, ident_filters.get("protein-groups").?.boolean);
+    try std.testing.expectEqual(false, ident_filters.get("shared-peptides").?.boolean);
+
+    // Quality control — array of tables with inline table parameters
+    const qc = root.get("quality_control").?.table;
+    const qc_checks = qc.get("checks").?.array;
+    try std.testing.expectEqual(@as(usize, 4), qc_checks.items.len);
+    try std.testing.expectEqualStrings("Outlier Samples", qc_checks.items[1].table.get("name").?.string);
+    try std.testing.expectEqualStrings("mahalanobis", qc_checks.items[1].table.get("parameters").?.table.get("method").?.string);
+
+    // Computing cluster jobs — array of tables with sub-tables
+    const comp = root.get("computing").?.table;
+    const cluster = comp.get("cluster").?.table;
+    const jobs = cluster.get("jobs").?.array;
+    try std.testing.expectEqual(@as(usize, 4), jobs.items.len);
+    try std.testing.expectEqualStrings("database_search", jobs.items[0].table.get("name").?.string);
+    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC",
+        jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
+
+    // Pipeline array of tables
+    const pipeline = root.get("pipeline").?.array;
+    try std.testing.expectEqual(@as(usize, 6), pipeline.items.len);
+
+    // User custom settings — quoted table header ["user.custom-settings"]
+    const custom = root.get("user.custom-settings").?.table;
+    try std.testing.expectEqual(false, custom.get("enable_debug").?.boolean);
+    const nested = custom.get("nested").?.table;
+    try std.testing.expectEqual(@as(i64, 42), nested.get("number").?.integer);
+    try std.testing.expectEqual(@as(i64, 0xDEADBEEF), nested.get("magic").?.integer);
+
+    // Deep nested table via quoted+dotted key in header
+    const deep = nested.get("deep").?.table;
+    try std.testing.expectEqual(@as(i64, 3), deep.get("level").?.integer);
+    try std.testing.expectEqual(true, deep.get("active").?.boolean);
+
+    // Enrichment
+    const enrich = root.get("enrichment").?.table;
+    try std.testing.expectEqual(@as(usize, 7), enrich.get("databases").?.array.items.len);
+}

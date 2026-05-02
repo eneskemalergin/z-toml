@@ -1,0 +1,2268 @@
+{
+  "title": {
+    "type": "string",
+    "value": "Quantitative Proteomics: Cellular Response to Thermal Stress"
+  },
+  "description": {
+    "type": "string",
+    "value": "Multi-dimensional proteomics analysis investigating protein abundance changes in a human embryonic kidney cell line subjected to gradual thermal stress (37°C → 42°C → 45°C) over 24 h. Quantification uses an 18-plex isobaric labelling reagent."
+  },
+  "notes": {
+    "type": "string",
+    "value": "Raw files : /data/raw/*.raw
+Processed : /data/processed/
+Archive   : /data/archive/2025-Q1/
+NOTE: \t and \n are NOT escape sequences inside literal strings.
+"
+  },
+  "study-id": {
+    "type": "string",
+    "value": "PROT-2025-0042"
+  },
+  "schema_ver": {
+    "type": "string",
+    "value": "1.1.0"
+  },
+  "study_start_date": {
+    "type": "date-local",
+    "value": "2025-01-15"
+  },
+  "study_end_date": {
+    "type": "date-local",
+    "value": "2025-03-22"
+  },
+  "data_collection_start": {
+    "type": "datetime-local",
+    "value": "2025-01-15T08:30:00"
+  },
+  "data_collection_end": {
+    "type": "datetime",
+    "value": "2025-03-22T17:45:00Z"
+  },
+  "last_updated": {
+    "type": "datetime",
+    "value": "2025-04-01T14:22:33.123456789-05:00"
+  },
+  "analysis_timestamp": {
+    "type": "datetime",
+    "value": "2025-04-02T09:15:00Z"
+  },
+  "daily_run_time": {
+    "type": "time-local",
+    "value": "08:30:00.5"
+  },
+  "version": {
+    "type": "string",
+    "value": "2.1.0-beta"
+  },
+  "is_published": {
+    "type": "bool",
+    "value": "false"
+  },
+  "is_clinical": {
+    "type": "bool",
+    "value": "true"
+  },
+  "samples": {
+    "total_samples": {
+      "type": "integer",
+      "value": "96"
+    },
+    "biological_replicates": {
+      "type": "integer",
+      "value": "24"
+    },
+    "technical_replicates": {
+      "type": "integer",
+      "value": "4"
+    },
+    "control_group_mask": {
+      "type": "integer",
+      "value": "192"
+    },
+    "plate_capacity": {
+      "type": "integer",
+      "value": "384"
+    },
+    "well_volume_nl": {
+      "type": "integer",
+      "value": "50000"
+    },
+    "target_mass_accuracy": {
+      "type": "float",
+      "value": "0.00000314"
+    },
+    "min_peptide_probability": {
+      "type": "float",
+      "value": "0.95"
+    },
+    "default_rt_window": {
+      "type": "float",
+      "value": "1.5"
+    },
+    "max_charge_state": {
+      "type": "float",
+      "value": "-100"
+    },
+    "special_threshold": {
+      "type": "float",
+      "value": "inf"
+    },
+    "negative_inf_example": {
+      "type": "float",
+      "value": "-inf"
+    },
+    "positive_inf_example": {
+      "type": "float",
+      "value": "inf"
+    },
+    "undefined_metric": {
+      "type": "float",
+      "value": "nan"
+    },
+    "groups": {
+      "conditions": [
+        {
+          "name": {
+            "type": "string",
+            "value": "Control_37C"
+          },
+          "temperature": {
+            "type": "float",
+            "value": "37"
+          },
+          "duration_h": {
+            "type": "integer",
+            "value": "24"
+          },
+          "sample_ids": [
+            {
+              "type": "integer",
+              "value": "1"
+            },
+            {
+              "type": "integer",
+              "value": "2"
+            },
+            {
+              "type": "integer",
+              "value": "3"
+            },
+            {
+              "type": "integer",
+              "value": "4"
+            },
+            {
+              "type": "integer",
+              "value": "5"
+            },
+            {
+              "type": "integer",
+              "value": "6"
+            },
+            {
+              "type": "integer",
+              "value": "7"
+            },
+            {
+              "type": "integer",
+              "value": "8"
+            }
+          ]
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "Heat_42C"
+          },
+          "temperature": {
+            "type": "float",
+            "value": "42"
+          },
+          "duration_h": {
+            "type": "integer",
+            "value": "24"
+          },
+          "sample_ids": [
+            {
+              "type": "integer",
+              "value": "9"
+            },
+            {
+              "type": "integer",
+              "value": "10"
+            },
+            {
+              "type": "integer",
+              "value": "11"
+            },
+            {
+              "type": "integer",
+              "value": "12"
+            },
+            {
+              "type": "integer",
+              "value": "13"
+            },
+            {
+              "type": "integer",
+              "value": "14"
+            },
+            {
+              "type": "integer",
+              "value": "15"
+            },
+            {
+              "type": "integer",
+              "value": "16"
+            }
+          ]
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "Heat_45C"
+          },
+          "temperature": {
+            "type": "float",
+            "value": "45"
+          },
+          "duration_h": {
+            "type": "integer",
+            "value": "24"
+          },
+          "sample_ids": [
+            {
+              "type": "integer",
+              "value": "17"
+            },
+            {
+              "type": "integer",
+              "value": "18"
+            },
+            {
+              "type": "integer",
+              "value": "19"
+            },
+            {
+              "type": "integer",
+              "value": "20"
+            },
+            {
+              "type": "integer",
+              "value": "21"
+            },
+            {
+              "type": "integer",
+              "value": "22"
+            },
+            {
+              "type": "integer",
+              "value": "23"
+            },
+            {
+              "type": "integer",
+              "value": "24"
+            }
+          ]
+        }
+      ]
+    },
+    "metadata": {
+      "organism": {
+        "type": "string",
+        "value": "Homo sapiens"
+      },
+      "tissue": {
+        "type": "string",
+        "value": "Embryonic kidney"
+      },
+      "cell_line": {
+        "type": "string",
+        "value": "HEK293T"
+      },
+      "taxonomy_id": {
+        "type": "integer",
+        "value": "9606"
+      },
+      "culturing": {
+        "media": {
+          "type": "string",
+          "value": "DMEM"
+        },
+        "serum": {
+          "type": "string",
+          "value": "FBS 10%"
+        },
+        "co2_percent": {
+          "type": "float",
+          "value": "5"
+        },
+        "humidity": {
+          "type": "float",
+          "value": "95"
+        }
+      },
+      "passage": {
+        "number": {
+          "type": "integer",
+          "value": "12"
+        },
+        "frozen": {
+          "type": "date-local",
+          "value": "2025-01-10"
+        },
+        "revived": {
+          "type": "datetime-local",
+          "value": "2025-01-14T09:00:00"
+        }
+      }
+    }
+  },
+  "instrument": {
+    "vendor": {
+      "type": "string",
+      "value": "Generic Scientific Instruments"
+    },
+    "model": {
+      "type": "string",
+      "value": "OrbiHigh-X"
+    },
+    "serial_number": {
+      "type": "string",
+      "value": "OHX-20250042"
+    },
+    "settings": {
+      "acquisition_modes": [
+        {
+          "type": "string",
+          "value": "DDA"
+        },
+        {
+          "type": "string",
+          "value": "DIA"
+        },
+        {
+          "type": "string",
+          "value": "PRM"
+        }
+      ],
+      "enabled_scans": [
+        {
+          "type": "string",
+          "value": "MS1"
+        },
+        {
+          "type": "string",
+          "value": "MS2"
+        },
+        {
+          "type": "string",
+          "value": "MS3"
+        }
+      ],
+      "mz_ranges": [
+        [
+          {
+            "type": "float",
+            "value": "400"
+          },
+          {
+            "type": "float",
+            "value": "1200"
+          }
+        ],
+        [
+          {
+            "type": "float",
+            "value": "500"
+          },
+          {
+            "type": "float",
+            "value": "1500"
+          }
+        ],
+        [
+          {
+            "type": "float",
+            "value": "300"
+          },
+          {
+            "type": "float",
+            "value": "900"
+          }
+        ]
+      ],
+      "calibration_params": [
+        {
+          "type": "integer",
+          "value": "1"
+        },
+        {
+          "type": "float",
+          "value": "2.5"
+        },
+        {
+          "type": "string",
+          "value": "linear"
+        },
+        {
+          "type": "bool",
+          "value": "true"
+        }
+      ],
+      "resolution": {
+        "type": "integer",
+        "value": "120000"
+      },
+      "agc_target": {
+        "type": "float",
+        "value": "400000"
+      },
+      "max_injection_time": {
+        "type": "float",
+        "value": "50"
+      },
+      "acq_log_format": {
+        "type": "string",
+        "value": "RUN	{id}	{time}	ACQ={mode}
+"
+      },
+      "ionization": {
+        "source": {
+          "type": "string",
+          "value": "NSI"
+        },
+        "spray_voltage": {
+          "type": "float",
+          "value": "2100"
+        },
+        "capillary_temp": {
+          "type": "float",
+          "value": "275"
+        },
+        "s_lens_rf": {
+          "type": "float",
+          "value": "50"
+        }
+      },
+      "fragments": {
+        "collision_energy": {
+          "type": "float",
+          "value": "30"
+        },
+        "activation_type": {
+          "type": "string",
+          "value": "HCD"
+        },
+        "energy_ramp": [
+          {
+            "type": "float",
+            "value": "25"
+          },
+          {
+            "type": "float",
+            "value": "30"
+          },
+          {
+            "type": "float",
+            "value": "35"
+          }
+        ]
+      },
+      "calibration": {
+        "enabled": {
+          "type": "bool",
+          "value": "true"
+        },
+        "interval_hours": {
+          "type": "integer",
+          "value": "24"
+        },
+        "last_calibration": {
+          "type": "datetime",
+          "value": "2025-04-01T06:00:00Z"
+        },
+        "tolerance_ppm": {
+          "type": "float",
+          "value": "1"
+        }
+      }
+    }
+  },
+  "database": {
+    "name": {
+      "type": "string",
+      "value": "RefProteome_Human"
+    },
+    "version": {
+      "type": "string",
+      "value": "2025_01"
+    },
+    "fasta_path": {
+      "type": "string",
+      "value": "/data/databases/ref_human_2025_01.fasta"
+    },
+    "decoy_prefix": {
+      "type": "string",
+      "value": "DECOY_"
+    },
+    "contaminants": {
+      "type": "bool",
+      "value": "true"
+    },
+    "description": {
+      "type": "string",
+      "value": "RefProteome_Human: curated reference proteome for Homo sapiens.
+Reviewed entries only (Swiss-Prot tier), including canonical isoforms.
+Sequences sourced from public databases; version tag: 2025_01.
+Path convention: /data/databases/<name>_<YYYY>_<MM>.fasta
+  "
+    },
+    "search": {
+      "enzyme": {
+        "type": "string",
+        "value": "Trypsin"
+      },
+      "max_missed_cleavages": {
+        "type": "integer",
+        "value": "2"
+      },
+      "min_peptide_length": {
+        "type": "integer",
+        "value": "7"
+      },
+      "max_peptide_length": {
+        "type": "integer",
+        "value": "50"
+      },
+      "fixed_modifications": [
+        {
+          "type": "string",
+          "value": "Carbamidomethyl (C)"
+        }
+      ],
+      "variable_modifications": [
+        {
+          "type": "string",
+          "value": "Oxidation (M)"
+        },
+        {
+          "type": "string",
+          "value": "Acetyl (Protein N-term)"
+        },
+        {
+          "type": "string",
+          "value": "Phospho (STY)"
+        },
+        {
+          "type": "string",
+          "value": "Methyl (K)"
+        },
+        {
+          "type": "string",
+          "value": "Deamidation (NQ)"
+        }
+      ],
+      "precursor_tolerance": {
+        "type": "float",
+        "value": "10"
+      },
+      "fragment_tolerance": {
+        "type": "float",
+        "value": "0.02"
+      },
+      "tolerance_units": {
+        "type": "string",
+        "value": "ppm"
+      },
+      "scoring": {
+        "algorithm": {
+          "type": "string",
+          "value": "Percolator"
+        },
+        "fdr_threshold": {
+          "type": "float",
+          "value": "0.01"
+        },
+        "validation_level": {
+          "type": "string",
+          "value": "peptide-level"
+        },
+        "use_charge_state": {
+          "type": "bool",
+          "value": "true"
+        },
+        "use_delta_score": {
+          "type": "bool",
+          "value": "true"
+        },
+        "use_rt_model": {
+          "type": "bool",
+          "value": "true"
+        }
+      },
+      "advanced": {
+        "open_search": {
+          "type": "bool",
+          "value": "false"
+        },
+        "mass_offset_range": [
+          {
+            "type": "float",
+            "value": "-100"
+          },
+          {
+            "type": "float",
+            "value": "100"
+          }
+        ],
+        "min_isotope_error": {
+          "type": "integer",
+          "value": "0"
+        },
+        "max_isotope_error": {
+          "type": "integer",
+          "value": "2"
+        }
+      }
+    }
+  },
+  "quantification": {
+    "method": {
+      "type": "string",
+      "value": "TMTpro"
+    },
+    "isobaric_reagent": {
+      "type": "string",
+      "value": "TMTpro-18plex"
+    },
+    "reporter_ion_range": [
+      {
+        "type": "float",
+        "value": "126"
+      },
+      {
+        "type": "float",
+        "value": "131"
+      }
+    ],
+    "normalization": {
+      "type": "string",
+      "value": "median"
+    },
+    "channels": {
+      "channel_126": {
+        "name": {
+          "type": "string",
+          "value": "126C"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Control_37C_1"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "1"
+        }
+      },
+      "channel_127N": {
+        "name": {
+          "type": "string",
+          "value": "127N"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Control_37C_2"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "2"
+        }
+      },
+      "channel_127C": {
+        "name": {
+          "type": "string",
+          "value": "127C"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Control_37C_3"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "3"
+        }
+      },
+      "channel_128N": {
+        "name": {
+          "type": "string",
+          "value": "128N"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_42C_1"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "4"
+        }
+      },
+      "channel_128C": {
+        "name": {
+          "type": "string",
+          "value": "128C"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_42C_2"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "5"
+        }
+      },
+      "channel_129N": {
+        "name": {
+          "type": "string",
+          "value": "129N"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_42C_3"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "6"
+        }
+      },
+      "channel_129C": {
+        "name": {
+          "type": "string",
+          "value": "129C"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_45C_1"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "7"
+        }
+      },
+      "channel_130N": {
+        "name": {
+          "type": "string",
+          "value": "130N"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_45C_2"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "8"
+        }
+      },
+      "channel_130C": {
+        "name": {
+          "type": "string",
+          "value": "130C"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_45C_3"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "9"
+        }
+      },
+      "channel_131N": {
+        "name": {
+          "type": "string",
+          "value": "131N"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_45C_4"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "10"
+        }
+      },
+      "channel_131C": {
+        "name": {
+          "type": "string",
+          "value": "131C"
+        },
+        "sample": {
+          "type": "string",
+          "value": "Heat_45C_5"
+        },
+        "plex": {
+          "type": "integer",
+          "value": "11"
+        }
+      }
+    },
+    "normalization_config": {
+      "method": {
+        "type": "string",
+        "value": "trimmed_mean"
+      },
+      "trim_percent": {
+        "type": "float",
+        "value": "0.05"
+      },
+      "reference_channel": {
+        "type": "string",
+        "value": "channel_126"
+      },
+      "apply_log2": {
+        "type": "bool",
+        "value": "true"
+      }
+    },
+    "imputation": {
+      "strategy": {
+        "type": "string",
+        "value": "MinProb"
+      },
+      "width": {
+        "type": "float",
+        "value": "0.3"
+      },
+      "downshift": {
+        "type": "float",
+        "value": "1.8"
+      },
+      "seed": {
+        "type": "integer",
+        "value": "42"
+      }
+    }
+  },
+  "identification": {
+    "pipeline": {
+      "type": "string",
+      "value": "FragSearch + PostProcess"
+    },
+    "search_engines": [
+      {
+        "type": "string",
+        "value": "FragSearch"
+      },
+      {
+        "type": "string",
+        "value": "CoSearch"
+      },
+      {
+        "type": "string",
+        "value": "TandemX"
+      }
+    ],
+    "filters": {
+      "min_peptides_per_protein": {
+        "type": "integer",
+        "value": "2"
+      },
+      "min_unique_peptides": {
+        "type": "integer",
+        "value": "1"
+      },
+      "max_q_value": {
+        "type": "float",
+        "value": "0.01"
+      },
+      "remove_decoys": {
+        "type": "bool",
+        "value": "true"
+      },
+      "remove_contaminants": {
+        "type": "bool",
+        "value": "true"
+      },
+      "protein-groups": {
+        "type": "bool",
+        "value": "true"
+      },
+      "shared-peptides": {
+        "type": "bool",
+        "value": "false"
+      },
+      "razor-peptides": {
+        "type": "bool",
+        "value": "true"
+      }
+    },
+    "post_processing": {
+      "protein_inference": {
+        "type": "string",
+        "value": "parsimony"
+      },
+      "run_percolator": {
+        "type": "bool",
+        "value": "true"
+      },
+      "run_crystal": {
+        "type": "bool",
+        "value": "false"
+      },
+      "combine_channels": {
+        "type": "bool",
+        "value": "true"
+      },
+      "report": {
+        "include_decoys": {
+          "type": "bool",
+          "value": "false"
+        },
+        "include_contaminants": {
+          "type": "bool",
+          "value": "false"
+        },
+        "output_format": {
+          "type": "string",
+          "value": "tsv"
+        }
+      }
+    }
+  },
+  "output": {
+    "base_directory": {
+      "type": "string",
+      "value": "/data/projects/thermal_stress_2025/results"
+    },
+    "create_timestamp_dir": {
+      "type": "bool",
+      "value": "true"
+    },
+    "formats": [
+      {
+        "type": "string",
+        "value": "tsv"
+      },
+      {
+        "type": "string",
+        "value": "xlsx"
+      },
+      {
+        "type": "string",
+        "value": "mzTab"
+      },
+      {
+        "type": "string",
+        "value": "json"
+      }
+    ],
+    "files": {
+      "protein_matrix": {
+        "type": "string",
+        "value": "protein_quant_matrix.tsv"
+      },
+      "peptide_matrix": {
+        "type": "string",
+        "value": "peptide_quant_matrix.tsv"
+      },
+      "msstats_input": {
+        "type": "string",
+        "value": "msstats_input.csv"
+      },
+      "mztab": {
+        "type": "string",
+        "value": "analysis_results.mzTab"
+      },
+      "log_entry_format": {
+        "type": "string",
+        "value": "RESULT	{protein}	{fc:.4f}	{pval:.2e}
+"
+      },
+      "report_header": {
+        "type": "string",
+        "value": "z-toml analysis pipeline[0m"
+      }
+    },
+    "visualization": {
+      "generate_volcano": {
+        "type": "bool",
+        "value": "true"
+      },
+      "generate_heatmap": {
+        "type": "bool",
+        "value": "true"
+      },
+      "generate_pca": {
+        "type": "bool",
+        "value": "true"
+      },
+      "generate_ma_plot": {
+        "type": "bool",
+        "value": "false"
+      },
+      "color_palette": [
+        {
+          "type": "string",
+          "value": "#1B9E77"
+        },
+        {
+          "type": "string",
+          "value": "#D95F02"
+        },
+        {
+          "type": "string",
+          "value": "#7570B3"
+        },
+        {
+          "type": "string",
+          "value": "#E7298A"
+        },
+        {
+          "type": "string",
+          "value": "#66A61E"
+        }
+      ],
+      "figure_dpi": {
+        "type": "integer",
+        "value": "300"
+      },
+      "export_format": {
+        "type": "string",
+        "value": "png"
+      },
+      "volcano_config": {
+        "x_label": {
+          "type": "string",
+          "value": "log2(Fold Change)"
+        },
+        "y_label": {
+          "type": "string",
+          "value": "-log10(adj. p-value)"
+        },
+        "fc_cutoff": {
+          "type": "float",
+          "value": "1"
+        },
+        "pval_cutoff": {
+          "type": "float",
+          "value": "0.05"
+        },
+        "point_size": {
+          "type": "integer",
+          "value": "2"
+        },
+        "alpha": {
+          "type": "float",
+          "value": "0.6"
+        }
+      }
+    }
+  },
+  "quality_control": {
+    "enabled": {
+      "type": "bool",
+      "value": "true"
+    },
+    "min_ms1_signal": {
+      "type": "float",
+      "value": "10000"
+    },
+    "min_ms2_peaks": {
+      "type": "integer",
+      "value": "10"
+    },
+    "metrics": {
+      "ms1_signal_to_noise": {
+        "type": "float",
+        "value": "3"
+      },
+      "id_rate_percent": {
+        "type": "float",
+        "value": "25"
+      },
+      "precursor_accuracy_ppm": {
+        "type": "float",
+        "value": "5"
+      },
+      "rt_deviation_minutes": {
+        "type": "float",
+        "value": "1.5"
+      },
+      "passing_thresholds": {
+        "id_rate": {
+          "type": "float",
+          "value": "20"
+        },
+        "qc_score": {
+          "type": "float",
+          "value": "0.85"
+        },
+        "completeness": {
+          "type": "float",
+          "value": "0.9"
+        }
+      }
+    },
+    "checks": [
+      {
+        "name": {
+          "type": "string",
+          "value": "Missing Values"
+        },
+        "threshold": {
+          "type": "float",
+          "value": "0.3"
+        },
+        "action": {
+          "type": "string",
+          "value": "flag"
+        },
+        "severity": {
+          "type": "string",
+          "value": "warning"
+        }
+      },
+      {
+        "name": {
+          "type": "string",
+          "value": "Outlier Samples"
+        },
+        "threshold": {
+          "type": "float",
+          "value": "3"
+        },
+        "action": {
+          "type": "string",
+          "value": "review"
+        },
+        "severity": {
+          "type": "string",
+          "value": "error"
+        },
+        "parameters": {
+          "method": {
+            "type": "string",
+            "value": "mahalanobis"
+          },
+          "alpha": {
+            "type": "float",
+            "value": "0.01"
+          }
+        }
+      },
+      {
+        "name": {
+          "type": "string",
+          "value": "Batch Effects"
+        },
+        "threshold": {
+          "type": "float",
+          "value": "0.15"
+        },
+        "action": {
+          "type": "string",
+          "value": "correct"
+        },
+        "severity": {
+          "type": "string",
+          "value": "info"
+        },
+        "parameters": {
+          "method": {
+            "type": "string",
+            "value": "combat"
+          },
+          "covariates": [
+            {
+              "type": "string",
+              "value": "batch"
+            },
+            {
+              "type": "string",
+              "value": "run_date"
+            }
+          ]
+        }
+      },
+      {
+        "name": {
+          "type": "string",
+          "value": "Retention Time Drift"
+        },
+        "threshold": {
+          "type": "float",
+          "value": "2"
+        },
+        "action": {
+          "type": "string",
+          "value": "recalibrate"
+        },
+        "severity": {
+          "type": "string",
+          "value": "warning"
+        },
+        "parameters": {
+          "reference": {
+            "type": "string",
+            "value": "iRT"
+          },
+          "model": {
+            "type": "string",
+            "value": "linear"
+          },
+          "min_anchors": {
+            "type": "integer",
+            "value": "10"
+          }
+        }
+      }
+    ]
+  },
+  "computing": {
+    "max_memory_mb": {
+      "type": "integer",
+      "value": "128000"
+    },
+    "threads": {
+      "type": "integer",
+      "value": "32"
+    },
+    "max_runtime_hours": {
+      "type": "integer",
+      "value": "48"
+    },
+    "scratch_dir": {
+      "type": "string",
+      "value": "/scratch/proteomics"
+    },
+    "cluster": {
+      "scheduler": {
+        "type": "string",
+        "value": "SLURM"
+      },
+      "partition": {
+        "type": "string",
+        "value": "highmem"
+      },
+      "account": {
+        "type": "string",
+        "value": "proteomics_lab"
+      },
+      "qos": {
+        "type": "string",
+        "value": "normal"
+      },
+      "jobs": [
+        {
+          "name": {
+            "type": "string",
+            "value": "database_search"
+          },
+          "cpus": {
+            "type": "integer",
+            "value": "16"
+          },
+          "memory_gb": {
+            "type": "integer",
+            "value": "64"
+          },
+          "walltime": {
+            "type": "string",
+            "value": "24:00:00"
+          },
+          "modules": [
+            {
+              "type": "string",
+              "value": "OpenJDK/11.0.2"
+            },
+            {
+              "type": "string",
+              "value": "Python/3.11.0"
+            }
+          ],
+          "environment": {
+            "JAVA_OPTS": {
+              "type": "string",
+              "value": "-Xmx32g -XX:+UseG1GC"
+            },
+            "OMP_NUM_THREADS": {
+              "type": "string",
+              "value": "16"
+            },
+            "TMPDIR": {
+              "type": "string",
+              "value": "/scratch/proteomics/tmp"
+            }
+          }
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "quantification"
+          },
+          "cpus": {
+            "type": "integer",
+            "value": "8"
+          },
+          "memory_gb": {
+            "type": "integer",
+            "value": "32"
+          },
+          "walltime": {
+            "type": "string",
+            "value": "12:00:00"
+          },
+          "modules": [
+            {
+              "type": "string",
+              "value": "R/4.3.0"
+            },
+            {
+              "type": "string",
+              "value": "OpenMS/3.0.0"
+            }
+          ],
+          "environment": {
+            "R_LIBS_USER": {
+              "type": "string",
+              "value": "/home/user/R/library"
+            },
+            "OMP_NUM_THREADS": {
+              "type": "string",
+              "value": "8"
+            }
+          }
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "differential_analysis"
+          },
+          "cpus": {
+            "type": "integer",
+            "value": "4"
+          },
+          "memory_gb": {
+            "type": "integer",
+            "value": "16"
+          },
+          "walltime": {
+            "type": "string",
+            "value": "06:00:00"
+          },
+          "modules": [
+            {
+              "type": "string",
+              "value": "Python/3.11.0"
+            },
+            {
+              "type": "string",
+              "value": "NumPy/1.24.0"
+            },
+            {
+              "type": "string",
+              "value": "SciPy/1.11.0"
+            }
+          ],
+          "environment": {
+            "MATPLOTLIB_BACKEND": {
+              "type": "string",
+              "value": "Agg"
+            },
+            "OMP_NUM_THREADS": {
+              "type": "string",
+              "value": "4"
+            }
+          }
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "enrichment"
+          },
+          "cpus": {
+            "type": "integer",
+            "value": "2"
+          },
+          "memory_gb": {
+            "type": "integer",
+            "value": "8"
+          },
+          "walltime": {
+            "type": "string",
+            "value": "02:00:00"
+          },
+          "modules": [
+            {
+              "type": "string",
+              "value": "R/4.3.0"
+            },
+            {
+              "type": "string",
+              "value": "BiocManager/1.30.0"
+            }
+          ],
+          "environment": {
+            "R_LIBS_USER": {
+              "type": "string",
+              "value": "/home/user/R/library"
+            },
+            "OMP_NUM_THREADS": {
+              "type": "string",
+              "value": "2"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "differential_expression": {
+    "tool": {
+      "type": "string",
+      "value": "MSstats"
+    },
+    "contrast": {
+      "type": "string",
+      "value": "Heat_vs_Control"
+    },
+    "adjustment_method": {
+      "type": "string",
+      "value": "BH"
+    },
+    "comparisons": {
+      "pairs": [
+        {
+          "name": {
+            "type": "string",
+            "value": "42C_vs_37C"
+          },
+          "condition_a": {
+            "type": "string",
+            "value": "Heat_42C"
+          },
+          "condition_b": {
+            "type": "string",
+            "value": "Control_37C"
+          },
+          "samples_a": [
+            {
+              "type": "integer",
+              "value": "9"
+            },
+            {
+              "type": "integer",
+              "value": "10"
+            },
+            {
+              "type": "integer",
+              "value": "11"
+            },
+            {
+              "type": "integer",
+              "value": "12"
+            },
+            {
+              "type": "integer",
+              "value": "13"
+            },
+            {
+              "type": "integer",
+              "value": "14"
+            },
+            {
+              "type": "integer",
+              "value": "15"
+            },
+            {
+              "type": "integer",
+              "value": "16"
+            }
+          ],
+          "samples_b": [
+            {
+              "type": "integer",
+              "value": "1"
+            },
+            {
+              "type": "integer",
+              "value": "2"
+            },
+            {
+              "type": "integer",
+              "value": "3"
+            },
+            {
+              "type": "integer",
+              "value": "4"
+            },
+            {
+              "type": "integer",
+              "value": "5"
+            },
+            {
+              "type": "integer",
+              "value": "6"
+            },
+            {
+              "type": "integer",
+              "value": "7"
+            },
+            {
+              "type": "integer",
+              "value": "8"
+            }
+          ]
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "45C_vs_37C"
+          },
+          "condition_a": {
+            "type": "string",
+            "value": "Heat_45C"
+          },
+          "condition_b": {
+            "type": "string",
+            "value": "Control_37C"
+          },
+          "samples_a": [
+            {
+              "type": "integer",
+              "value": "17"
+            },
+            {
+              "type": "integer",
+              "value": "18"
+            },
+            {
+              "type": "integer",
+              "value": "19"
+            },
+            {
+              "type": "integer",
+              "value": "20"
+            },
+            {
+              "type": "integer",
+              "value": "21"
+            },
+            {
+              "type": "integer",
+              "value": "22"
+            },
+            {
+              "type": "integer",
+              "value": "23"
+            },
+            {
+              "type": "integer",
+              "value": "24"
+            }
+          ],
+          "samples_b": [
+            {
+              "type": "integer",
+              "value": "1"
+            },
+            {
+              "type": "integer",
+              "value": "2"
+            },
+            {
+              "type": "integer",
+              "value": "3"
+            },
+            {
+              "type": "integer",
+              "value": "4"
+            },
+            {
+              "type": "integer",
+              "value": "5"
+            },
+            {
+              "type": "integer",
+              "value": "6"
+            },
+            {
+              "type": "integer",
+              "value": "7"
+            },
+            {
+              "type": "integer",
+              "value": "8"
+            }
+          ]
+        },
+        {
+          "name": {
+            "type": "string",
+            "value": "45C_vs_42C"
+          },
+          "condition_a": {
+            "type": "string",
+            "value": "Heat_45C"
+          },
+          "condition_b": {
+            "type": "string",
+            "value": "Heat_42C"
+          },
+          "samples_a": [
+            {
+              "type": "integer",
+              "value": "17"
+            },
+            {
+              "type": "integer",
+              "value": "18"
+            },
+            {
+              "type": "integer",
+              "value": "19"
+            },
+            {
+              "type": "integer",
+              "value": "20"
+            },
+            {
+              "type": "integer",
+              "value": "21"
+            },
+            {
+              "type": "integer",
+              "value": "22"
+            },
+            {
+              "type": "integer",
+              "value": "23"
+            },
+            {
+              "type": "integer",
+              "value": "24"
+            }
+          ],
+          "samples_b": [
+            {
+              "type": "integer",
+              "value": "9"
+            },
+            {
+              "type": "integer",
+              "value": "10"
+            },
+            {
+              "type": "integer",
+              "value": "11"
+            },
+            {
+              "type": "integer",
+              "value": "12"
+            },
+            {
+              "type": "integer",
+              "value": "13"
+            },
+            {
+              "type": "integer",
+              "value": "14"
+            },
+            {
+              "type": "integer",
+              "value": "15"
+            },
+            {
+              "type": "integer",
+              "value": "16"
+            }
+          ]
+        }
+      ]
+    },
+    "thresholds": {
+      "log2fc": {
+        "type": "float",
+        "value": "1"
+      },
+      "adj_pval": {
+        "type": "float",
+        "value": "0.05"
+      },
+      "min_intensity": {
+        "type": "float",
+        "value": "100000"
+      }
+    },
+    "model": {
+      "formula": {
+        "type": "string",
+        "value": "~ condition + run"
+      },
+      "random_effect": {
+        "type": "string",
+        "value": "subject"
+      },
+      "missing_value_imputation": {
+        "type": "string",
+        "value": "survreg"
+      }
+    }
+  },
+  "enrichment": {
+    "enabled": {
+      "type": "bool",
+      "value": "true"
+    },
+    "background": {
+      "type": "string",
+      "value": "complete_proteome"
+    },
+    "databases": [
+      {
+        "type": "string",
+        "value": "GO_Biological_Process"
+      },
+      {
+        "type": "string",
+        "value": "GO_Molecular_Function"
+      },
+      {
+        "type": "string",
+        "value": "GO_Cellular_Component"
+      },
+      {
+        "type": "string",
+        "value": "KEGG"
+      },
+      {
+        "type": "string",
+        "value": "Reactome"
+      },
+      {
+        "type": "string",
+        "value": "WikiPathways"
+      },
+      {
+        "type": "string",
+        "value": "MSigDB_Hallmarks"
+      }
+    ],
+    "parameters": {
+      "significance_level": {
+        "type": "float",
+        "value": "0.05"
+      },
+      "min_gene_set_size": {
+        "type": "integer",
+        "value": "10"
+      },
+      "max_gene_set_size": {
+        "type": "integer",
+        "value": "500"
+      },
+      "correction_method": {
+        "type": "string",
+        "value": "Bonferroni"
+      },
+      "use_background_set": {
+        "type": "bool",
+        "value": "true"
+      },
+      "custom_gene_sets": [
+        {
+          "type": "string",
+          "value": "thermal_response_genes"
+        },
+        {
+          "type": "string",
+          "value": "heat_shock_proteins"
+        },
+        {
+          "type": "string",
+          "value": "chaperone_network"
+        },
+        {
+          "type": "string",
+          "value": "protein_folding_pathway"
+        },
+        {
+          "type": "string",
+          "value": "unfolded_protein_response"
+        }
+      ]
+    },
+    "gsea": {
+      "n_permutations": {
+        "type": "integer",
+        "value": "1000"
+      },
+      "seed": {
+        "type": "integer",
+        "value": "20250101"
+      },
+      "min_set_fraction": {
+        "type": "float",
+        "value": "0.1"
+      },
+      "scoring_scheme": {
+        "type": "string",
+        "value": "weighted"
+      }
+    }
+  },
+  "annotation": {
+    "uniprot_mapping": {
+      "type": "bool",
+      "value": "true"
+    },
+    "add_gene_names": {
+      "type": "bool",
+      "value": "true"
+    },
+    "add_protein_descriptions": {
+      "type": "bool",
+      "value": "true"
+    },
+    "add_subcellular_location": {
+      "type": "bool",
+      "value": "true"
+    },
+    "sources": {
+      "uniprot_release": {
+        "type": "string",
+        "value": "2025_01"
+      },
+      "gene_ontology": {
+        "type": "date-local",
+        "value": "2025-01-01"
+      },
+      "reactome_version": {
+        "type": "string",
+        "value": "89"
+      },
+      "string_version": {
+        "type": "string",
+        "value": "12.0"
+      },
+      "api_endpoints": {
+        "uniprot": {
+          "type": "string",
+          "value": "https://rest.uniprot.example/api/v2"
+        },
+        "string": {
+          "type": "string",
+          "value": "https://string-db.example/api/v1"
+        },
+        "biogrid": {
+          "type": "string",
+          "value": "https://webservice.biogrid.example/v3"
+        }
+      }
+    },
+    "custom_databases": {
+      "enabled": {
+        "type": "bool",
+        "value": "true"
+      },
+      "paths": [
+        {
+          "type": "string",
+          "value": "/data/annotations/heat_shock_db.tsv"
+        },
+        {
+          "type": "string",
+          "value": "/data/annotations/chaperome_atlas.tsv"
+        }
+      ]
+    }
+  },
+  "pipeline": [
+    {
+      "step": {
+        "type": "integer",
+        "value": "1"
+      },
+      "name": {
+        "type": "string",
+        "value": "Raw Data Conversion"
+      },
+      "tool": {
+        "type": "string",
+        "value": "RawConverter"
+      },
+      "input": {
+        "type": "string",
+        "value": "*.raw"
+      },
+      "output": {
+        "type": "string",
+        "value": "*.mzML"
+      },
+      "parameters": {
+        "compression": {
+          "type": "bool",
+          "value": "true"
+        },
+        "precision": {
+          "type": "integer",
+          "value": "64"
+        },
+        "peak_picking": {
+          "type": "string",
+          "value": "vendor"
+        }
+      }
+    },
+    {
+      "step": {
+        "type": "integer",
+        "value": "2"
+      },
+      "name": {
+        "type": "string",
+        "value": "Database Search"
+      },
+      "tool": {
+        "type": "string",
+        "value": "FragSearch"
+      },
+      "input": {
+        "type": "string",
+        "value": "*.mzML"
+      },
+      "output": {
+        "type": "string",
+        "value": "*.pin"
+      },
+      "parameters": {
+        "database": {
+          "type": "string",
+          "value": "ref_human.fasta"
+        },
+        "enzyme": {
+          "type": "string",
+          "value": "trypsin"
+        },
+        "precursor_tol": {
+          "type": "integer",
+          "value": "10"
+        },
+        "fragment_tol": {
+          "type": "integer",
+          "value": "20"
+        },
+        "isotope_error": {
+          "type": "integer",
+          "value": "2"
+        }
+      }
+    },
+    {
+      "step": {
+        "type": "integer",
+        "value": "3"
+      },
+      "name": {
+        "type": "string",
+        "value": "Post-Processing"
+      },
+      "tool": {
+        "type": "string",
+        "value": "PostProcessor"
+      },
+      "input": {
+        "type": "string",
+        "value": "*.pin"
+      },
+      "output": {
+        "type": "string",
+        "value": "*.filtered.tsv"
+      },
+      "parameters": {
+        "fdr": {
+          "type": "float",
+          "value": "0.01"
+        },
+        "protein_inference": {
+          "type": "string",
+          "value": "parsimony"
+        },
+        "run_percolator": {
+          "type": "bool",
+          "value": "true"
+        }
+      }
+    },
+    {
+      "step": {
+        "type": "integer",
+        "value": "4"
+      },
+      "name": {
+        "type": "string",
+        "value": "Quantification"
+      },
+      "tool": {
+        "type": "string",
+        "value": "QuantKit"
+      },
+      "input": {
+        "type": "string",
+        "value": "*.filtered.tsv"
+      },
+      "output": {
+        "type": "string",
+        "value": "protein_quant.tsv"
+      },
+      "parameters": {
+        "method": {
+          "type": "string",
+          "value": "TMTpro"
+        },
+        "normalization": {
+          "type": "string",
+          "value": "median"
+        },
+        "sum_channels": {
+          "type": "bool",
+          "value": "false"
+        }
+      }
+    },
+    {
+      "step": {
+        "type": "integer",
+        "value": "5"
+      },
+      "name": {
+        "type": "string",
+        "value": "Differential Analysis"
+      },
+      "tool": {
+        "type": "string",
+        "value": "StatAnalyzer"
+      },
+      "input": {
+        "type": "string",
+        "value": "protein_quant.tsv"
+      },
+      "output": {
+        "type": "string",
+        "value": "diff_exp_results.tsv"
+      },
+      "parameters": {
+        "contrast": {
+          "type": "string",
+          "value": "Heat_vs_Control"
+        },
+        "adjustment": {
+          "type": "string",
+          "value": "BH"
+        },
+        "log2fc_threshold": {
+          "type": "float",
+          "value": "1"
+        }
+      }
+    },
+    {
+      "step": {
+        "type": "integer",
+        "value": "6"
+      },
+      "name": {
+        "type": "string",
+        "value": "Pathway Enrichment"
+      },
+      "tool": {
+        "type": "string",
+        "value": "PathwayRunner"
+      },
+      "input": {
+        "type": "string",
+        "value": "diff_exp_results.tsv"
+      },
+      "output": {
+        "type": "string",
+        "value": "enrichment_results.tsv"
+      },
+      "parameters": {
+        "databases": [
+          {
+            "type": "string",
+            "value": "GO_BP"
+          },
+          {
+            "type": "string",
+            "value": "KEGG"
+          },
+          {
+            "type": "string",
+            "value": "Reactome"
+          }
+        ],
+        "pval_cutoff": {
+          "type": "float",
+          "value": "0.05"
+        },
+        "n_perm": {
+          "type": "integer",
+          "value": "1000"
+        }
+      }
+    }
+  ],
+  "collaborators": {
+    "pi": {
+      "type": "string",
+      "value": "Dr. Alex Morgan"
+    },
+    "analysts": [
+      {
+        "type": "string",
+        "value": "Jordan Lee"
+      },
+      {
+        "type": "string",
+        "value": "Casey Kim"
+      },
+      {
+        "type": "string",
+        "value": "Riley Patel"
+      }
+    ],
+    "reviewers": [
+      {
+        "type": "string",
+        "value": "Dr. Sam Torres"
+      },
+      {
+        "type": "string",
+        "value": "Dr. Quinn Nakamura"
+      }
+    ],
+    "institutions": {
+      "primary": {
+        "type": "string",
+        "value": "Institute for Computational Biology"
+      },
+      "secondary": [
+        {
+          "type": "string",
+          "value": "State University"
+        },
+        {
+          "type": "string",
+          "value": "General Hospital Research Center"
+        }
+      ],
+      "funding": [
+        {
+          "type": "string",
+          "value": "GRANT-2025-BC-001234"
+        },
+        {
+          "type": "string",
+          "value": "GRANT-2025-NS-567890"
+        }
+      ]
+    },
+    "contact": {
+      "email": {
+        "type": "string",
+        "value": "proteomics@icb.example.org"
+      },
+      "website": {
+        "type": "string",
+        "value": "https://icb.example.org/morganlab"
+      },
+      "orcid": {
+        "type": "string",
+        "value": "0000-0002-XXXX-XXXX"
+      }
+    }
+  },
+  "user.custom-settings": {
+    "enable_debug": {
+      "type": "bool",
+      "value": "false"
+    },
+    "log_level": {
+      "type": "string",
+      "value": "INFO"
+    },
+    "cache_dir": {
+      "type": "string",
+      "value": "/tmp/proteomics_cache"
+    },
+    "experimental_features": [
+      {
+        "type": "string",
+        "value": "new_scoring"
+      },
+      {
+        "type": "string",
+        "value": "deep_learning_rt"
+      },
+      {
+        "type": "string",
+        "value": "denovo_assist"
+      }
+    ],
+    "deep_learning": {
+      "model_path": {
+        "type": "string",
+        "value": "/models/rt_predictor_v3.onnx"
+      },
+      "device": {
+        "type": "string",
+        "value": "cpu"
+      },
+      "batch_size": {
+        "type": "integer",
+        "value": "512"
+      },
+      "fp16": {
+        "type": "bool",
+        "value": "false"
+      }
+    },
+    "nested": {
+      "key": {
+        "type": "string",
+        "value": "value"
+      },
+      "number": {
+        "type": "integer",
+        "value": "42"
+      },
+      "bits": {
+        "type": "integer",
+        "value": "170"
+      },
+      "perms": {
+        "type": "integer",
+        "value": "493"
+      },
+      "magic": {
+        "type": "integer",
+        "value": "3735928559"
+      },
+      "deep": {
+        "level": {
+          "type": "integer",
+          "value": "3"
+        },
+        "active": {
+          "type": "bool",
+          "value": "true"
+        },
+        "tag": {
+          "type": "string",
+          "value": "DEEP↓NESTED"
+        }
+      }
+    }
+  }
+}

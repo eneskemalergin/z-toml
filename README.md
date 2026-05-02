@@ -79,11 +79,11 @@ pub fn main() !void {
 
     var err: toml.ErrorInfo = .{};
     const root = toml.parseSlice(gpa, src, &err) catch |e| {
-        std.debug.print("parse error at {d}:{d} — {s}\n",
+        std.debug.print("parse error at {d}:{d}: {s}\n",
             .{ err.line, err.col, err.message() });
         return e;
     };
-    // root is *toml.Table — a string-keyed ordered hash map.
+    // root is *toml.Table, a string-keyed ordered hash map.
     // Free with toml.deinit(root, gpa), or just deinit the arena.
 
     const title = root.get("title").?.string;        // "My App"
@@ -151,13 +151,25 @@ Every value in the tree is owned by the `gpa` you passed to `parseSlice`. You ha
 1. **Arena**: pass `arena.allocator()` and call `arena.deinit()` when done.
 2. **GPA**: call `toml.deinit(root, gpa)` to walk and free the tree precisely.
 
-## Running the example
+## Running the examples
+
+Two examples demonstrate the parser at different complexity levels:
+
+### Simple: `example.toml`
 
 ```sh
 zig build example
 ```
 
-Parses `examples/example.toml` and prints a typed JSON representation to stdout.
+Parses `examples/example.toml` (a small configuration snippet) and prints a typed JSON representation to stdout.
+
+### Sophisticated: `proteomics.toml`
+
+```sh
+zig build proteomics
+```
+
+Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that exercises every TOML v1.1.0 feature: bare keys, quoted keys, dotted keys, all integer bases (hex, octal, binary), special floats (inf, -inf, nan), all four datetime types, multi-line basic and literal strings, escape sequences (`\e`, `\xHH`, `\uHHHH`, `\UHHHHHHHH`), arrays (nested, mixed-type), inline tables (single-line and multi-line), dotted-key table headers with quoted segments (`["user.custom-settings".nested.deep]`), and deeply nested arrays of tables. Outputs a structured color-coded report.
 
 ## Running tests
 
@@ -165,7 +177,15 @@ Parses `examples/example.toml` and prints a typed JSON representation to stdout.
 zig build test
 ```
 
-Runs 28 unit tests plus the full toml-lang/toml-test corpus.
+Runs 29 unit tests plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files).
+
+## Build steps
+
+| Command                | What it does                                          |
+| ---------------------- | ----------------------------------------------------- |
+| `zig build test`       | Run all unit tests and the toml-test corpus           |
+| `zig build example`    | Parse `examples/example.toml` → JSON to stdout        |
+| `zig build proteomics` | Parse `examples/proteomics.toml` → color-coded report |
 
 ## References
 

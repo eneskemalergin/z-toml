@@ -38,7 +38,22 @@ pub fn build(b: *std.Build) void {
     const run_example = b.addRunArtifact(example_exe);
     run_example.addArg("examples/example.toml");
 
+    const proteomics_exe = b.addExecutable(.{
+        .name = "parse-proteomics",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/parse_proteomics.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "toml", .module = toml_module },
+            },
+        }),
+    });
+
+    const run_proteomics = b.addRunArtifact(proteomics_exe);
+
     const run_tests = b.addRunArtifact(tests);
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
     b.step("example", "Run the example TOML parser").dependOn(&run_example.step);
+    b.step("proteomics", "Parse and print proteomics.toml").dependOn(&run_proteomics.step);
 }
