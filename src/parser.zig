@@ -733,8 +733,6 @@ const Parser = struct {
             is_float = true;
             self.advance();
             _ = try self.consumeDigitsWithUnderscores();
-            if (integer_starts_with_zero and !integer_is_zero)
-                return self.fail("leading zeros in float", .{});
         }
 
         if (self.peek() == 'e' or self.peek() == 'E') {
@@ -743,6 +741,9 @@ const Parser = struct {
             if (self.peek() == '+' or self.peek() == '-') self.advance();
             _ = try self.consumeDigitsWithUnderscores();
         }
+
+        if (is_float and integer_starts_with_zero and !integer_is_zero)
+            return self.fail("leading zeros in float", .{});
 
         var buf: [64]u8 = undefined;
         const numstr = try self.sanitizedNumber(start, self.pos, &buf);
@@ -839,16 +840,18 @@ const Parser = struct {
                 return self.fail("cannot extend inline table", .{});
             const gop = tbl.getOrPut(self.gpa, part) catch return error.OutOfMemory;
             if (!gop.found_existing) {
+                // Initialize sentinels immediately: deinitTable is safe even if
+                // subsequent allocations fail (free of zero-len key = no-op,
+                // deinit of boolean = no-op; no errdefer needed).
+                gop.value_ptr.* = .{ .boolean = false };
+                gop.key_ptr.* = &.{};
                 const sub = try self.gpa.create(Table);
                 sub.* = .empty;
-                errdefer {
-                    sub.deinit(self.gpa);
-                    self.gpa.destroy(sub);
-                }
-                _ = try self.createMeta(sub, .implicit);
-                gop.key_ptr.* = try self.gpa.dupe(u8, part);
                 gop.value_ptr.* = .{ .table = sub };
-                self.getMeta(sub).kind = .dotted;
+                const sub_meta = try self.createMeta(sub, .implicit);
+                const key_copy = try self.gpa.dupe(u8, part);
+                gop.key_ptr.* = key_copy;
+                sub_meta.kind = .dotted;
                 try meta.key_kinds.put(ma, gop.key_ptr.*, .dotted_table);
                 tbl = sub;
                 meta = self.getMeta(tbl);
@@ -878,9 +881,14 @@ const Parser = struct {
             return self.fail("cannot add keys to inline table after definition", .{});
         if (tbl.contains(last)) return self.fail("key '{s}' is already defined", .{last});
 
+        // Ensure capacity first so the insertion below is infallible; this
+        // prevents a partial-state slot that would corrupt deinitTable on OOM.
+        try tbl.ensureUnusedCapacity(self.gpa, 1);
         const key_owned = try self.gpa.dupe(u8, last);
-        errdefer self.gpa.free(key_owned);
-        tbl.put(self.gpa, key_owned, value) catch return error.OutOfMemory;
+        var key_in_map = false;
+        errdefer if (!key_in_map) self.gpa.free(key_owned);
+        tbl.putAssumeCapacityNoClobber(key_owned, value);
+        key_in_map = true; // table owns key_owned; deinitTable handles cleanup
 
         const kk: KeyKind = switch (value) {
             .table => |t| switch (self.getMeta(t).kind) {
@@ -942,11 +950,14 @@ const Parser = struct {
         for (path[0 .. path.len - 1]) |part| {
             const gop = tbl.getOrPut(self.gpa, part) catch return error.OutOfMemory;
             if (!gop.found_existing) {
+                gop.value_ptr.* = .{ .boolean = false };
+                gop.key_ptr.* = &.{};
                 const sub = try self.gpa.create(Table);
                 sub.* = .empty;
-                _ = try self.createMeta(sub, .implicit);
-                gop.key_ptr.* = try self.gpa.dupe(u8, part);
                 gop.value_ptr.* = .{ .table = sub };
+                _ = try self.createMeta(sub, .implicit);
+                const key_copy = try self.gpa.dupe(u8, part);
+                gop.key_ptr.* = key_copy;
                 try meta.key_kinds.put(ma, gop.key_ptr.*, .implicit_table);
                 tbl = sub;
                 meta = self.getMeta(tbl);
@@ -970,11 +981,14 @@ const Parser = struct {
         const last = path[path.len - 1];
         const gop = tbl.getOrPut(self.gpa, last) catch return error.OutOfMemory;
         if (!gop.found_existing) {
+            gop.value_ptr.* = .{ .boolean = false };
+            gop.key_ptr.* = &.{};
             const sub = try self.gpa.create(Table);
             sub.* = .empty;
-            _ = try self.createMeta(sub, .header);
-            gop.key_ptr.* = try self.gpa.dupe(u8, last);
             gop.value_ptr.* = .{ .table = sub };
+            _ = try self.createMeta(sub, .header);
+            const key_copy = try self.gpa.dupe(u8, last);
+            gop.key_ptr.* = key_copy;
             try meta.key_kinds.put(ma, gop.key_ptr.*, .header_table);
             return sub;
         }
@@ -1003,11 +1017,14 @@ const Parser = struct {
         for (path[0 .. path.len - 1]) |part| {
             const gop = tbl.getOrPut(self.gpa, part) catch return error.OutOfMemory;
             if (!gop.found_existing) {
+                gop.value_ptr.* = .{ .boolean = false };
+                gop.key_ptr.* = &.{};
                 const sub = try self.gpa.create(Table);
                 sub.* = .empty;
-                _ = try self.createMeta(sub, .implicit);
-                gop.key_ptr.* = try self.gpa.dupe(u8, part);
                 gop.value_ptr.* = .{ .table = sub };
+                _ = try self.createMeta(sub, .implicit);
+                const key_copy = try self.gpa.dupe(u8, part);
+                gop.key_ptr.* = key_copy;
                 try meta.key_kinds.put(ma, gop.key_ptr.*, .implicit_table);
                 tbl = sub;
                 meta = self.getMeta(tbl);
@@ -1031,14 +1048,13 @@ const Parser = struct {
         const last = path[path.len - 1];
         const gop = tbl.getOrPut(self.gpa, last) catch return error.OutOfMemory;
         if (!gop.found_existing) {
+            gop.value_ptr.* = .{ .boolean = false };
+            gop.key_ptr.* = &.{};
             const arr = try self.gpa.create(Array);
             arr.* = .empty;
-            errdefer {
-                arr.deinit(self.gpa);
-                self.gpa.destroy(arr);
-            }
-            gop.key_ptr.* = try self.gpa.dupe(u8, last);
             gop.value_ptr.* = .{ .array = arr };
+            const key_copy = try self.gpa.dupe(u8, last);
+            gop.key_ptr.* = key_copy;
             try meta.key_kinds.put(ma, gop.key_ptr.*, .aot_array);
             return self.appendAOTElement(arr);
         }

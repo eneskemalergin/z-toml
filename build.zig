@@ -4,7 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const toml_module = b.createModule(.{
+    // Expose the library module to downstream packages via:
+    //   b.dependency("z_toml", .{}).module("toml")
+    const toml_module = b.addModule("toml", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,

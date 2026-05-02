@@ -272,6 +272,16 @@ test "offset datetime preserves fractional seconds" {
     try std.testing.expectEqual(@as(i16, 0), dt.offset_minutes);
 }
 
+test "reject leading zeros in exponent-only float" {
+    const gpa = std.testing.allocator;
+    try std.testing.expectError(error.ParseFailed, toml.parseSlice(gpa, "x = 00e1\n", null));
+    try std.testing.expectError(error.ParseFailed, toml.parseSlice(gpa, "x = 01e2\n", null));
+    // Valid: single zero before exponent is allowed
+    const root = try toml.parseSlice(gpa, "x = 0e1\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.0), root.get("x").?.float, 1e-15);
+}
+
 test "example file: spec-example-1.toml" {
     const gpa = std.testing.allocator;
     const src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "test/valid/spec-example-1.toml", gpa, .limited(std.math.maxInt(usize)));
