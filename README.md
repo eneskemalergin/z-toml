@@ -39,7 +39,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .z_toml = .{
-        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.1.tar.gz",
+        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.2.tar.gz",
         .hash = "<run zig fetch to get the hash>",
     },
 },
@@ -48,7 +48,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 Or use `zig fetch` to add it automatically:
 
 ```sh
-zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.1.tar.gz
+zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.2.tar.gz
 ```
 
 Then wire it up in your `build.zig`:
@@ -251,13 +251,14 @@ Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that 
 zig build test
 ```
 
-Runs 55 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
+Runs 75 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
 ## Build steps
 
 | Command                | What it does                                           |
 | ---------------------- | ------------------------------------------------------ |
 | `zig build test`       | Run all unit tests and the toml-test corpus            |
+| `zig build fuzz`       | Run the in-process fuzz harness (5000 random inputs)   |
 | `zig build example`    | Parse `examples/example.toml` -> JSON to stdout        |
 | `zig build proteomics` | Parse `examples/proteomics.toml` -> color-coded report |
 
@@ -266,7 +267,7 @@ Runs 55 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus
 | Version | Feature | Notes |
 | ------- | ------- | ----- |
 | **v0.1.1** | `parseInto(T)` typed parser | Shipped |
-| **v0.1.2** | Code quality and refactoring | File renames, memory layering fix, `src/output/` namespace. No API changes. |
+| **v0.1.2** | Code quality and refactoring | Shipped. File renames (`types.zig`→`value.zig`, `typed.zig`→`static.zig`), memory layering fix, `src/output/` namespace, bug fixes, 75 tests. No API changes. |
 | **v0.1.3** | `fromToml` custom hook | User types opt in by declaring `pub fn fromToml(v: toml.Value) !T`. Covers types that do not map directly (e.g. `std.net.Address`). |
 | **v0.1.4** | `toJson` output | Convert a parsed `Value` tree to JSON. No external dependency. |
 | **v0.2.0** | `writeToml` serializer | Write a `Value` tree or typed struct back to `.toml` text. First write-path capability. |

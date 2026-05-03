@@ -5,6 +5,27 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
+## [0.1.2] - 2026-05-02
+
+### Added
+
+- Two new escape sequence unit tests: `\x` hex escape produces correct bytes, `\e` escape produces ESC byte. Test suite is now 75 tests (52 feature + 5 corpus + 18 OOM).
+
+### Changed
+
+- `src/types.zig` renamed to `src/value.zig`. The file defines the `Value` union and datetime types; the new name matches its content.
+- `src/typed.zig` renamed to `src/static.zig`. "Static parser" is the project's own term for the `parseInto` path.
+- `deinitTable` and `Value.deinit` moved from `value.zig` into `parser.zig`. `value.zig` is now a pure type-definitions file with no allocator dependency. `root.zig` calls `parser.deinitTable` (public API unchanged).
+- `src/output/` namespace created with placeholder files `json.zig` and `toml.zig` for the upcoming `toJson` (v0.1.4) and `writeToml`/`fmtToml` (v0.2.0+) modules.
+- `build.zig.zon` version bumped to `0.1.2`.
+
+### Fixed
+
+- Missing `try` on `gpa.dupe` call in `src/static.zig`. The omission caused a compile error at call sites that did not themselves return `Allocator.Error`; the allocation failure path was also silently unreachable.
+- Dead `value[end..end]` slice (always empty) removed from `normalizeTemporalValue` in `test/corpus.zig`. The `bufPrint` call now uses a 2-argument form.
+
+---
+
 ## [0.1.1] - 2026-05-02
 
 ### Added

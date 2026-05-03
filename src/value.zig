@@ -57,5 +57,4 @@ pub const Value = union(enum) {
     array: *Array,
     /// Heap-allocated so its address is stable (needed during parse).
     table: *Table,
-
 };
