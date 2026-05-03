@@ -376,8 +376,7 @@ test "proteomics.toml parses successfully" {
     const jobs = cluster.get("jobs").?.array;
     try std.testing.expectEqual(@as(usize, 4), jobs.items.len);
     try std.testing.expectEqualStrings("database_search", jobs.items[0].table.get("name").?.string);
-    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC",
-        jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
+    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC", jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
 
     // Pipeline array of tables
     const pipeline = root.get("pipeline").?.array;

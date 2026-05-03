@@ -1,6 +1,6 @@
 //! TOML v1.1.0 single-pass recursive-descent parser.
 const std = @import("std");
-const types = @import("types.zig");
+const types = @import("value.zig");
 
 pub const Table = types.Table;
 pub const Array = types.Array;

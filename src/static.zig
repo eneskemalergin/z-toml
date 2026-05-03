@@ -6,7 +6,7 @@
 //! See `src/root.zig` for the public `parseInto` entry point.
 
 const std = @import("std");
-const types = @import("types.zig");
+const types = @import("value.zig");
 const parser_mod = @import("parser.zig");
 
 const Allocator = std.mem.Allocator;

@@ -6,9 +6,9 @@
 //! Memory: pass an `ArenaAllocator` and discard the arena, or call
 //! `deinit(root, gpa)` to free the tree manually.
 const std = @import("std");
-const types = @import("types.zig");
+const types = @import("value.zig");
 const parser_mod = @import("parser.zig");
-const typed_mod = @import("typed.zig");
+const typed_mod = @import("static.zig");
 
 // ─── Re-export public types ───────────────────────────────────────────────────
 
