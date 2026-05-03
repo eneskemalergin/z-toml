@@ -1,4 +1,4 @@
-/// TOML v1.1.0 single-pass recursive-descent parser.
+//! TOML v1.1.0 single-pass recursive-descent parser.
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -65,6 +65,7 @@ const Parser = struct {
             .table_metas = .empty,
             .err_info = .{},
         };
+        errdefer p.meta_arena.deinit();
         _ = try p.createMeta(root, .root);
         return p;
     }
@@ -87,7 +88,7 @@ const Parser = struct {
 
     fn fail(self: *Parser, comptime fmt: []const u8, args: anytype) ParseError {
         self.err_info.line = self.line;
-        self.err_info.col = @intCast(self.pos - self.line_start + 1);
+        self.err_info.col = @intCast(if (self.pos >= self.line_start) self.pos - self.line_start + 1 else 1);
         const msg = std.fmt.bufPrint(&self.err_info._buf, fmt, args) catch blk: {
             const s = "error message too long";
             @memcpy(self.err_info._buf[0..s.len], s);
@@ -221,12 +222,19 @@ const Parser = struct {
             parts.deinit(self.gpa);
         }
         const first = try self.parseKeyPart();
+        var first_owned = true;
+        errdefer if (first_owned) self.gpa.free(first);
         try parts.append(self.gpa, first);
+        first_owned = false;
         while (true) {
             self.skipInlineWs();
             if (!self.eat('.')) break;
             self.skipInlineWs();
-            try parts.append(self.gpa, try self.parseKeyPart());
+            const next_key = try self.parseKeyPart();
+            var next_owned = true;
+            errdefer if (next_owned) self.gpa.free(next_key);
+            try parts.append(self.gpa, next_key);
+            next_owned = false;
         }
         return parts;
     }
@@ -372,12 +380,12 @@ const Parser = struct {
                 }
             },
             ' ', '\t' => {
-                if (!multiline) return self.fail("invalid escape '\\{c}'", .{c});
+                if (!multiline) return self.fail("invalid escape sequence '\\{c}'", .{c});
                 while (self.peek()) |ch| {
                     if (ch == ' ' or ch == '\t') self.advance() else break;
                 }
                 if (self.peek() != '\n' and self.peek() != '\r')
-                    return self.fail("backslash-whitespace only valid before newline in ML strings", .{});
+                    return self.fail("backslash-whitespace only valid before newline in multi-line strings", .{});
                 while (self.peek()) |ch| {
                     if (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') self.advance() else break;
                 }
@@ -418,7 +426,7 @@ const Parser = struct {
             const c = self.peek() orelse return self.fail("unterminated literal string", .{});
             if (c == '\'') break;
             if (c == '\n' or c == '\r') return self.fail("newline in single-line literal string", .{});
-            if (c != '\t' and (c < 0x20 or c == 0x7F)) return self.fail("control character in literal string", .{});
+            if (c != '\t' and (c < 0x20 or c == 0x7F)) return self.fail("control character U+{X:0>4} not allowed in literal string", .{c});
             self.advance();
         }
         const s = try self.gpa.dupe(u8, self.input[start..self.pos]);
@@ -457,7 +465,7 @@ const Parser = struct {
                 continue;
             }
             if (c != '\t' and c != '\n' and (c < 0x20 or c == 0x7F))
-                return self.fail("control character in multi-line literal string", .{});
+                return self.fail("control character U+{X:0>4} not allowed in multi-line literal string", .{c});
             self.advance();
             try buf.append(self.gpa, c);
         }
@@ -615,6 +623,8 @@ const Parser = struct {
         const tot: i16 = @intCast(h * 60 + m);
         return if (neg) -tot else tot;
     }
+
+    // ─── number parsing helpers ────────────────────────────────────────────────
 
     fn parseNDigits(self: *Parser, n: usize) ParseError!u32 {
         var v: u32 = 0;
@@ -951,7 +961,7 @@ const Parser = struct {
             } else {
                 const kk = meta.key_kinds.get(gop.key_ptr.*) orelse .value;
                 switch (kk) {
-                    .value, .inline_table => return self.fail("cannot use '{s}' as a table — already a non-table value", .{part}),
+                    .value, .inline_table => return self.fail("cannot use '{s}' as a table: already a non-table value", .{part}),
                     .aot_array => {
                         const arr = gop.value_ptr.*.array;
                         tbl = arr.items[arr.items.len - 1].table;

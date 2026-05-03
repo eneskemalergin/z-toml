@@ -58,7 +58,7 @@ fn normalizeTemporalValue(buf: []u8, value: []const u8) []const u8 {
     while (trimmed_end > dot_index + 1 and value[trimmed_end - 1] == '0') : (trimmed_end -= 1) {}
     if (trimmed_end == end) return value;
 
-    return std.fmt.bufPrint(buf, "{s}{s}{s}", .{ value[0..trimmed_end], value[end..end], value[end..] }) catch value;
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ value[0..trimmed_end], value[end..] }) catch value;
 }
 
 fn formatLocalDate(buf: []u8, value: toml.LocalDate) []const u8 {
@@ -387,15 +387,15 @@ test "toml-test invalid corpus rejects" {
 //
 // These tests run the typed API across the full toml-test corpus, which is a
 // much harder stress test than the handwritten unit tests:
-//   • valid sweep  — every valid file must not produce ParseFailed
-//   • invalid sweep — every invalid file must produce ParseFailed (not MissingField
+//   * valid sweep: every valid file must not produce ParseFailed
+//   * invalid sweep: every invalid file must produce ParseFailed (not MissingField
 //     or TypeMismatch, which would mean the file parsed silently)
 //
 // We use an empty struct `struct {}` so mapTable immediately returns without
-// field iteration — the goal is not to verify field values here but to verify
+// field iteration. The goal is not to verify field values here but to verify
 // that the temp-arena allocation/teardown inside parseInto is correct for all
 // 215 valid inputs and that error propagation is correct for all 467 invalid
-// inputs.  A separate test below verifies actual field values on a real file.
+// inputs. A separate test below verifies actual field values on a real file.
 
 fn runParseIntoValidSweep() !void {
     const Empty = struct {};
@@ -419,7 +419,7 @@ fn runParseIntoValidSweep() !void {
         var err: toml.ErrorInfo = .{};
         _ = toml.parseInto(Empty, gpa, src, &err) catch |e| {
             if (e == error.OutOfMemory) return e;
-            // MissingField / TypeMismatch are fine — we have no fields.
+            // MissingField / TypeMismatch are fine: we have no fields.
             // ParseFailed on a valid file is a real failure.
             if (e == error.ParseFailed) {
                 failures += 1;
@@ -463,7 +463,7 @@ fn runParseIntoInvalidSweep() !void {
 
         var err: toml.ErrorInfo = .{};
         if (toml.parseInto(Empty, gpa, src, &err)) |_| {
-            // Parsed successfully — invalid file was not rejected.
+            // Parsed successfully: invalid file was not rejected.
             failures += 1;
             if (failures <= max_reported_failures) {
                 std.debug.print("\nparseInto invalid sweep: unexpectedly succeeded on {s}\n", .{entry});
@@ -472,8 +472,8 @@ fn runParseIntoInvalidSweep() !void {
             error.ParseFailed => {}, // correct
             error.MissingField, error.TypeMismatch => {
                 // These come from the mapping layer, not the parser, which
-                // means the invalid TOML was parsed without error.  That is a
-                // parser bug — same failure class as above.
+                // means the invalid TOML was parsed without error. That is a
+                // parser bug: same failure class as above.
                 failures += 1;
                 if (failures <= max_reported_failures) {
                     std.debug.print(
@@ -506,8 +506,8 @@ test "parseInto invalid corpus: ParseFailed on every invalid file" {
 // ─── parseInto corpus fixture: spec-example-1 ────────────────────────────────
 //
 // Maps the canonical TOML spec example from disk onto a precisely-typed struct
-// and asserts every field value.  This exercises the full mapping layer —
-// nested structs, slices, OffsetDateTime, bool — against a real corpus file.
+// and asserts every field value. This exercises the full mapping layer:
+// nested structs, slices, OffsetDateTime, bool, all against a real corpus file.
 
 test "parseInto corpus fixture: spec-example-1 fields are correct" {
     const ServerInfo = struct { ip: []const u8, dc: []const u8 };
@@ -527,7 +527,7 @@ test "parseInto corpus fixture: spec-example-1 fields are correct" {
         owner: Owner,
         database: Database,
         servers: Servers,
-        // clients.data is a mixed-type nested array — not mappable to a typed
+        // clients.data is a mixed-type nested array: not mappable to a typed
         // slice, so we skip it by making the whole section optional.
         clients: ?struct { hosts: [][]const u8 } = null,
     };

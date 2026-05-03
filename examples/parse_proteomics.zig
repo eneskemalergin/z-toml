@@ -70,7 +70,7 @@ pub fn main(init: std.process.Init) !void {
 
     var err_info: toml.ErrorInfo = .{};
     const root = toml.parseSlice(allocator, src, &err_info) catch |e| {
-        std.debug.print("parse error at line {d}:{d} — {s}\n", .{ err_info.line, err_info.col, err_info.message() });
+        std.debug.print("parse error at line {d}:{d}: {s}\n", .{ err_info.line, err_info.col, err_info.message() });
         return e;
     };
     defer toml.deinit(root, allocator);

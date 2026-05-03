@@ -1,3 +1,6 @@
+//! Parses a TOML file and prints it as typed JSON (toml-test format).
+//!
+//! Usage: zig build example        # parses examples/example.toml
 const std = @import("std");
 const toml = @import("toml");
 const Io = std.Io;

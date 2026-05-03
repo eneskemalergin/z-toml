@@ -263,16 +263,18 @@ Runs 55 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus
 
 ## Roadmap
 
-| Version    | Feature                     | Notes                                                                                                                                               |
-| ---------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **v0.1.1** | `parseInto(T)` typed parser | Shipped                                                                                                                                             |
-| **v0.1.2** | `writeToml` serializer      | Write a `Value` tree or typed struct back to `.toml` text.                                                                                          |
-| **v0.1.2** | `fromToml` hook             | User types opt in by declaring `pub fn fromToml(v: toml.Value) !T`. Covers types that do not map directly (e.g. `std.net.Address`).                 |
-| **v0.1.3** | `toJson` output             | Convert a parsed `Value` tree to JSON without an external dependency. Useful for tooling and debug.                                                 |
-| **v0.1.4** | Canonical formatter         | Pretty-print a `Value` tree back to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand.                      |
-| **v0.2.0** | Zero-copy strings           | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep the input buffer alive. |
-| **v0.2.0** | `cloneValue` helper         | Deep-copy a `Value` (or subtree) into a fresh allocator. Companion to zero-copy so callers can detach values when needed.                           |
-| **v0.3.0** | CLI binary (`z-toml`)       | Standalone tool with subcommands: `to-json`, `fmt`, `lint`. Built on top of the library; ships as a separate build artifact.                        |
+| Version | Feature | Notes |
+| ------- | ------- | ----- |
+| **v0.1.1** | `parseInto(T)` typed parser | Shipped |
+| **v0.1.2** | Code quality and refactoring | File renames, memory layering fix, `src/output/` namespace. No API changes. |
+| **v0.1.3** | `fromToml` custom hook | User types opt in by declaring `pub fn fromToml(v: toml.Value) !T`. Covers types that do not map directly (e.g. `std.net.Address`). |
+| **v0.1.4** | `toJson` output | Convert a parsed `Value` tree to JSON. No external dependency. |
+| **v0.2.0** | `writeToml` serializer | Write a `Value` tree or typed struct back to `.toml` text. First write-path capability. |
+| **v0.2.1** | Canonical formatter | Pretty-print a `Value` tree to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand. |
+| **v0.3.0** | Zero-copy strings | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep input alive. |
+| **v0.3.1** | `cloneValue` helper | Deep-copy a `Value` subtree into a fresh allocator. Companion to zero-copy. |
+| **v0.4.0** | In-place value rewriter | Modify specific TOML keys without re-serializing. Comments and formatting survive the edit. |
+| **v1.0.0** | `z-toml` CLI | Standalone binary with `to-json`, `fmt`, `lint`, and `rewrite` subcommands. Marks API stability commitment. |
 
 ## References
 

@@ -1,28 +1,10 @@
-/// z-toml — TOML v1.1.0 parser for Zig 0.16
-///
-/// Quick start
-/// ───────────
-///   const toml = @import("toml");
-///
-///   var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-///   defer arena.deinit();
-///
-///   var err: toml.ErrorInfo = .{};
-///   const root = toml.parseSlice(arena.allocator(), toml_text, &err) catch |e| {
-///       std.debug.print("parse error at {}:{} — {s}\n",
-///                       .{ err.line, err.col, err.message() });
-///       return e;
-///   };
-///
-///   // Access values:
-///   if (root.get("title")) |v| {
-///       std.debug.print("title = {s}\n", .{v.string});
-///   }
-///
-/// Memory management
-/// ─────────────────
-///   • Use an ArenaAllocator and let it handle everything, or
-///   • call `toml.deinit(root, gpa)` to free the tree manually.
+//! z-toml: TOML v1.1.0 parser for Zig 0.16.
+//!
+//! Single-pass, zero-dependency, corpus-validated.
+//! Use `parseSlice` for dynamic access or `parseInto` for typed struct mapping.
+//!
+//! Memory: pass an `ArenaAllocator` and discard the arena, or call
+//! `deinit(root, gpa)` to free the tree manually.
 const std = @import("std");
 const types = @import("types.zig");
 const parser_mod = @import("parser.zig");
@@ -48,9 +30,9 @@ pub const ParseIntoError = typed_mod.ParseIntoError;
 
 /// Parse `input` as TOML v1.1.0 and return the root table.
 ///
-/// `gpa`      — Allocator for all output memory (recommend ArenaAllocator).
-/// `input`    — UTF-8 TOML text.
-/// `err_info` — Optional; filled with line/col/message on failure.
+/// `gpa`      Allocator for all output memory (recommend ArenaAllocator).
+/// `input`    UTF-8 TOML text.
+/// `err_info` Optional; filled with line/col/message on failure.
 ///
 /// Free the result with `deinit(root, gpa)` or destroy the arena.
 pub fn parseSlice(
@@ -67,13 +49,11 @@ pub fn deinit(table: *Table, gpa: std.mem.Allocator) void {
     gpa.destroy(table);
 }
 
-/// Parse `input` as TOML v1.1.0 and map the root table onto a value of type `T`.
+/// Parse `input` and map the root table onto a struct of type `T`.
 ///
-/// `T` must be a struct whose field names correspond to TOML keys.
-/// See `src/typed.zig` for the full list of supported field types.
-///
-/// All output strings and slices are allocated with `gpa`.
-/// Using an `ArenaAllocator` is the simplest way to free everything at once.
+/// Field names must match TOML keys exactly. Supports nested structs,
+/// slices, optional fields, enums, and all datetime types.
+/// All strings and slices are allocated with `gpa`.
 pub fn parseInto(
     comptime T: type,
     gpa: std.mem.Allocator,

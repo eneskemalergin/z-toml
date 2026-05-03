@@ -1,7 +1,9 @@
-const _unit = @import("unit_test.zig");
-const _corpus = @import("corpus_test.zig");
+const _features = @import("features.zig");
+const _corpus = @import("corpus.zig");
+const _oom = @import("oom.zig");
 
 comptime {
-    _ = _unit;
+    _ = _features;
     _ = _corpus;
+    _ = _oom;
 }

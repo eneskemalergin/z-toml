@@ -1,14 +1,12 @@
-/// TOML v1.1.0 value types.
-///
-/// All heap memory is owned by the allocator that was passed to the parser.
-/// Use `Value.deinit(gpa)` / `deinitTable(tbl, gpa)` to free everything, or
-/// wrap the call site in an `ArenaAllocator` and discard the arena.
+//! TOML v1.1.0 value types.
+//!
+//! All heap memory is owned by the allocator that was passed to the parser.
+//! Use `Value.deinit(gpa)` / `deinitTable(tbl, gpa)` to free everything, or
+//! wrap the call site in an `ArenaAllocator` and discard the arena.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public container types
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Container types ────────────────────────────────────────────────────────
 
 /// Ordered string-keyed hash map (insertion order preserved).
 /// All keys are allocator-owned copies.
@@ -17,21 +15,19 @@ pub const Table = std.array_hash_map.String(Value);
 /// Growable list of Values.
 pub const Array = std.ArrayList(Value);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Date / time helper types
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Date / time helper types ───────────────────────────────────────────────
 
 pub const LocalDate = struct {
     year: u16,
-    month: u8, // 1–12
-    day: u8, // 1–31
+    month: u8,
+    day: u8,
 };
 
 pub const LocalTime = struct {
     hour: u8,
     minute: u8,
     second: u8,
-    /// Sub-second precision stored as nanoseconds (0–999_999_999).
+    /// Sub-second precision stored as nanoseconds (0-999_999_999).
     nanosecond: u32,
 };
 
@@ -47,9 +43,7 @@ pub const OffsetDateTime = struct {
     offset_minutes: i16,
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Core Value type
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Core Value type ────────────────────────────────────────────────────────
 
 pub const Value = union(enum) {
     string: []const u8,

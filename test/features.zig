@@ -315,7 +315,7 @@ test "proteomics.toml parses successfully" {
     try std.testing.expectEqualStrings("PROT-2025-0042", root.get("study-id").?.string);
     try std.testing.expectEqual(true, root.get("is_clinical").?.boolean);
 
-    // Samples — integer formats
+    // Samples: integer formats
     const samples = root.get("samples").?.table;
     try std.testing.expectEqual(@as(i64, 96), samples.get("total_samples").?.integer);
     try std.testing.expectEqual(@as(i64, 24), samples.get("biological_replicates").?.integer); // 0x18
@@ -325,13 +325,13 @@ test "proteomics.toml parses successfully" {
     try std.testing.expect(std.math.isInf(samples.get("special_threshold").?.float));
     try std.testing.expect(std.math.isNan(samples.get("undefined_metric").?.float));
 
-    // Conditions — array of tables
+    // Conditions: array of tables
     const groups = samples.get("groups").?.table;
     const conditions = groups.get("conditions").?.array;
     try std.testing.expectEqual(@as(usize, 3), conditions.items.len);
     try std.testing.expectEqualStrings("Control_37C", conditions.items[0].table.get("name").?.string);
 
-    // Instrument — nested settings
+    // Instrument: nested settings
     const instrument = root.get("instrument").?.table;
     const inst_settings = instrument.get("settings").?.table;
     try std.testing.expectEqual(@as(i64, 120000), inst_settings.get("resolution").?.integer);
@@ -351,38 +351,39 @@ test "proteomics.toml parses successfully" {
     try std.testing.expectEqualStrings("Trypsin", db_search.get("enzyme").?.string);
     try std.testing.expectEqual(@as(usize, 5), db_search.get("variable_modifications").?.array.items.len);
 
-    // Quantification channels — inline tables
+    // Quantification channels: inline tables
     const quant = root.get("quantification").?.table;
     const q_channels = quant.get("channels").?.table;
     try std.testing.expect(q_channels.count() >= 10);
     try std.testing.expectEqualStrings("126C", q_channels.get("channel_126").?.table.get("name").?.string);
 
-    // Identification filters — quoted keys with hyphens
+    // Identification filters: quoted keys with hyphens
     const ident = root.get("identification").?.table;
     const ident_filters = ident.get("filters").?.table;
     try std.testing.expectEqual(true, ident_filters.get("protein-groups").?.boolean);
     try std.testing.expectEqual(false, ident_filters.get("shared-peptides").?.boolean);
 
-    // Quality control — array of tables with inline table parameters
+    // Quality control: array of tables with inline table parameters
     const qc = root.get("quality_control").?.table;
     const qc_checks = qc.get("checks").?.array;
     try std.testing.expectEqual(@as(usize, 4), qc_checks.items.len);
     try std.testing.expectEqualStrings("Outlier Samples", qc_checks.items[1].table.get("name").?.string);
     try std.testing.expectEqualStrings("mahalanobis", qc_checks.items[1].table.get("parameters").?.table.get("method").?.string);
 
-    // Computing cluster jobs — array of tables with sub-tables
+    // Computing cluster jobs: array of tables with sub-tables
     const comp = root.get("computing").?.table;
     const cluster = comp.get("cluster").?.table;
     const jobs = cluster.get("jobs").?.array;
     try std.testing.expectEqual(@as(usize, 4), jobs.items.len);
     try std.testing.expectEqualStrings("database_search", jobs.items[0].table.get("name").?.string);
-    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC", jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
+    try std.testing.expectEqualStrings("-Xmx32g -XX:+UseG1GC",
+        jobs.items[0].table.get("environment").?.table.get("JAVA_OPTS").?.string);
 
     // Pipeline array of tables
     const pipeline = root.get("pipeline").?.array;
     try std.testing.expectEqual(@as(usize, 6), pipeline.items.len);
 
-    // User custom settings — quoted table header ["user.custom-settings"]
+    // Quoted table header ["user.custom-settings"]
     const custom = root.get("user.custom-settings").?.table;
     try std.testing.expectEqual(false, custom.get("enable_debug").?.boolean);
     const nested = custom.get("nested").?.table;
@@ -471,7 +472,7 @@ test "parseInto: optional nested struct absent yields null" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    // No [database] section at all — must produce null, not MissingField.
+    // No [database] section at all: must produce null, not MissingField.
     const cfg = try toml.parseInto(Config, arena.allocator(), "", null);
     try std.testing.expectEqual(@as(?Database, null), cfg.database);
 }
@@ -690,4 +691,24 @@ test "parseInto: enum unknown variant returns TypeMismatch" {
         error.TypeMismatch,
         toml.parseInto(Config, arena.allocator(), "log_level = \"trace\"", null),
     );
+}
+
+test "\\x hex escape produces correct bytes" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\s = "\x68\x65\x6c\x6c\x6f"
+    ;
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqualStrings("hello", root.get("s").?.string);
+}
+
+test "\\e escape produces ESC byte" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\s = "\e[31m"
+    ;
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqualStrings("\x1B[31m", root.get("s").?.string);
 }

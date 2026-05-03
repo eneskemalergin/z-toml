@@ -1,19 +1,9 @@
-//! Typed (static) TOML parser.
+//! Typed TOML parser: maps a TOML document directly onto a Zig struct
+//! via comptime reflection. Struct field names must match TOML keys exactly.
 //!
-//! `parseInto` maps a TOML document directly onto a Zig struct using
-//! comptime reflection.  Struct field names must match TOML keys exactly.
-//!
-//! Supported field types
-//! ─────────────────────
-//!   bool                            ← TOML boolean
-//!   integers (i8…i64, u8…u64, …)   ← TOML integer (range-checked)
-//!   f32 / f64                       ← TOML float (integer promoted silently)
-//!   []const u8                      ← TOML string (gpa-owned copy)
-//!   []T                             ← TOML array (gpa-owned slice of T)
-//!   struct                          ← TOML table (nested)
-//!   ?T                              ← value or null when key is absent
-//!   enum                            ← TOML string matched by name
-//!   LocalDate / LocalTime / LocalDateTime / OffsetDateTime
+//! Supported field types: bool, integers, f32/f64, []const u8, []T,
+//! nested structs, ?T (optional), enum, and all datetime structs.
+//! See `src/root.zig` for the public `parseInto` entry point.
 
 const std = @import("std");
 const types = @import("types.zig");
@@ -117,11 +107,11 @@ fn mapValue(comptime T: type, value: Value, gpa: Allocator) ParseIntoError!T {
                 @compileError("parseInto: unsupported pointer type " ++ @typeName(T));
             }
             if (ptr.child == u8) {
-                // []const u8 — copy the string into gpa
+                // []const u8: copy the string into gpa
                 if (value != .string) return error.TypeMismatch;
-                return gpa.dupe(u8, value.string);
+                return try gpa.dupe(u8, value.string);
             } else {
-                // []Child — allocate a gpa-owned slice
+                // []Child: allocate a gpa-owned slice
                 if (value != .array) return error.TypeMismatch;
                 const items = value.array.items;
                 const out = try gpa.alloc(ptr.child, items.len);
