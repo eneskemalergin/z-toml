@@ -154,17 +154,17 @@ Parses `input` and maps the root table onto a value of type `T` using comptime r
 
 Supported field types:
 
-| Zig field type | Maps from |
-| --- | --- |
-| `bool` | TOML boolean |
-| integers (`i8`..`i64`, `u8`..`u64`, ...) | TOML integer, range-checked |
-| `f32`, `f64` | TOML float; TOML integer is promoted silently |
-| `[]const u8` | TOML string (gpa-owned copy) |
-| `[]T` | TOML array |
-| struct | TOML table (nested) |
-| `?T` | value when present, `null` when the key is absent |
-| enum | TOML string matched by variant name |
-| `LocalDate`, `LocalTime`, `LocalDateTime`, `OffsetDateTime` | TOML datetime types |
+| Zig field type                                              | Maps from                                         |
+| ----------------------------------------------------------- | ------------------------------------------------- |
+| `bool`                                                      | TOML boolean                                      |
+| integers (`i8`..`i64`, `u8`..`u64`, ...)                    | TOML integer, range-checked                       |
+| `f32`, `f64`                                                | TOML float; TOML integer is promoted silently     |
+| `[]const u8`                                                | TOML string (gpa-owned copy)                      |
+| `[]T`                                                       | TOML array                                        |
+| struct                                                      | TOML table (nested)                               |
+| `?T`                                                        | value when present, `null` when the key is absent |
+| enum                                                        | TOML string matched by variant name               |
+| `LocalDate`, `LocalTime`, `LocalDateTime`, `OffsetDateTime` | TOML datetime types                               |
 
 Fields with a Zig default value use that default when the key is absent. Fields without a default and without `?` return `error.MissingField` when absent. Extra TOML keys not present in the struct are silently ignored.
 
@@ -255,19 +255,24 @@ Runs 55 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus
 
 ## Build steps
 
-| Command                | What it does                                          |
-| ---------------------- | ----------------------------------------------------- |
-| `zig build test`       | Run all unit tests and the toml-test corpus           |
-| `zig build example`    | Parse `examples/example.toml` → JSON to stdout        |
-| `zig build proteomics` | Parse `examples/proteomics.toml` → color-coded report |
+| Command                | What it does                                           |
+| ---------------------- | ------------------------------------------------------ |
+| `zig build test`       | Run all unit tests and the toml-test corpus            |
+| `zig build example`    | Parse `examples/example.toml` -> JSON to stdout        |
+| `zig build proteomics` | Parse `examples/proteomics.toml` -> color-coded report |
 
 ## Roadmap
 
-| Version | Feature | Status |
-| ------- | ------- | ------ |
-| **v0.1.1** | `parseInto(T)` typed parser | Shipped |
-| **v0.2** | Serialization | Write a Zig struct or `Value` tree back to a `.toml` file. |
-| **v0.3** | Zero-copy strings | Return `[]const u8` slices into the input buffer instead of allocating copies. Requires keeping the input alive for the lifetime of the result. |
+| Version    | Feature                     | Notes                                                                                                                                               |
+| ---------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **v0.1.1** | `parseInto(T)` typed parser | Shipped                                                                                                                                             |
+| **v0.1.2** | `writeToml` serializer      | Write a `Value` tree or typed struct back to `.toml` text.                                                                                          |
+| **v0.1.2** | `fromToml` hook             | User types opt in by declaring `pub fn fromToml(v: toml.Value) !T`. Covers types that do not map directly (e.g. `std.net.Address`).                 |
+| **v0.1.3** | `toJson` output             | Convert a parsed `Value` tree to JSON without an external dependency. Useful for tooling and debug.                                                 |
+| **v0.1.4** | Canonical formatter         | Pretty-print a `Value` tree back to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand.                      |
+| **v0.2.0** | Zero-copy strings           | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep the input buffer alive. |
+| **v0.2.0** | `cloneValue` helper         | Deep-copy a `Value` (or subtree) into a fresh allocator. Companion to zero-copy so callers can detach values when needed.                           |
+| **v0.3.0** | CLI binary (`z-toml`)       | Standalone tool with subcommands: `to-json`, `fmt`, `lint`. Built on top of the library; ships as a separate build artifact.                        |
 
 ## References
 

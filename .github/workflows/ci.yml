@@ -28,3 +28,6 @@ jobs:
 
       - name: Build example
         run: zig build example
+
+      - name: Build proteomics example
+        run: zig build proteomics
