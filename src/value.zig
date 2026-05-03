@@ -1,10 +1,9 @@
 //! TOML v1.1.0 value types.
 //!
-//! All heap memory is owned by the allocator that was passed to the parser.
-//! Use `Value.deinit(gpa)` / `deinitTable(tbl, gpa)` to free everything, or
-//! wrap the call site in an `ArenaAllocator` and discard the arena.
+//! This file contains only type definitions. Memory management functions
+//! (`deinitTable`, `Value.deinit`) live in `parser.zig` alongside the code
+//! that allocates these values.
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 
 // ─── Container types ────────────────────────────────────────────────────────
 
@@ -59,27 +58,4 @@ pub const Value = union(enum) {
     /// Heap-allocated so its address is stable (needed during parse).
     table: *Table,
 
-    /// Recursively free all memory owned by this value.
-    pub fn deinit(self: Value, gpa: Allocator) void {
-        switch (self) {
-            .string => |s| gpa.free(s),
-            .array => |arr| {
-                for (arr.items) |item| item.deinit(gpa);
-                arr.deinit(gpa);
-                gpa.destroy(arr);
-            },
-            .table => |tbl| {
-                deinitTable(tbl, gpa);
-                gpa.destroy(tbl);
-            },
-            else => {},
-        }
-    }
 };
-
-/// Free all keys, values and the table's own storage.
-pub fn deinitTable(tbl: *Table, gpa: Allocator) void {
-    for (tbl.keys()) |k| gpa.free(k);
-    for (tbl.values()) |v| v.deinit(gpa);
-    tbl.deinit(gpa);
-}

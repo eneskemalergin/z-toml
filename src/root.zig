@@ -45,7 +45,7 @@ pub fn parseSlice(
 
 /// Recursively free all memory owned by `table` and destroy the table itself.
 pub fn deinit(table: *Table, gpa: std.mem.Allocator) void {
-    types.deinitTable(table, gpa);
+    parser_mod.deinitTable(table, gpa);
     gpa.destroy(table);
 }
 

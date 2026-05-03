@@ -14,6 +14,32 @@ const Allocator = std.mem.Allocator;
 
 pub const ParseError = error{ ParseFailed, OutOfMemory };
 
+// ─── Memory management ────────────────────────────────────────────────────────
+
+/// Recursively free all memory owned by `value`.
+pub fn deinitValue(value: Value, gpa: Allocator) void {
+    switch (value) {
+        .string => |s| gpa.free(s),
+        .array => |arr| {
+            for (arr.items) |item| deinitValue(item, gpa);
+            arr.deinit(gpa);
+            gpa.destroy(arr);
+        },
+        .table => |tbl| {
+            deinitTable(tbl, gpa);
+            gpa.destroy(tbl);
+        },
+        else => {},
+    }
+}
+
+/// Free all keys, values and the table's own storage.
+pub fn deinitTable(tbl: *Table, gpa: Allocator) void {
+    for (tbl.keys()) |k| gpa.free(k);
+    for (tbl.values()) |v| deinitValue(v, gpa);
+    tbl.deinit(gpa);
+}
+
 pub const ErrorInfo = struct {
     line: u32 = 0,
     col: u32 = 0,
@@ -770,7 +796,7 @@ const Parser = struct {
         const arr = try self.gpa.create(Array);
         arr.* = .empty;
         errdefer {
-            for (arr.items) |item| item.deinit(self.gpa);
+            for (arr.items) |item| deinitValue(item, self.gpa);
             arr.deinit(self.gpa);
             self.gpa.destroy(arr);
         }
@@ -795,7 +821,7 @@ const Parser = struct {
         const tbl = try self.gpa.create(Table);
         tbl.* = .empty;
         errdefer {
-            types.deinitTable(tbl, self.gpa);
+            deinitTable(tbl, self.gpa);
             self.gpa.destroy(tbl);
         }
         _ = try self.createMeta(tbl, .inline_t);
@@ -811,7 +837,7 @@ const Parser = struct {
             try self.expect('=');
             self.skipInlineWs();
             const val = try self.parseValue();
-            errdefer val.deinit(self.gpa);
+            errdefer deinitValue(val, self.gpa);
             try self.setNestedKey(tbl, key_parts.items, val, true);
             try self.skipTrivia();
             if (!self.eat(',')) {
@@ -1082,7 +1108,7 @@ const Parser = struct {
         try self.expect('=');
         self.skipInlineWs();
         const val = try self.parseValue();
-        errdefer val.deinit(self.gpa);
+        errdefer deinitValue(val, self.gpa);
         try self.setNestedKey(self.cur, key_parts.items, val, false);
     }
 
@@ -1143,7 +1169,7 @@ pub fn parseSlice(gpa: Allocator, input: []const u8, err_info: ?*ErrorInfo) Pars
     defer parser.deinit();
     parser.parseDocument() catch |e| {
         if (err_info) |ei| ei.* = parser.err_info;
-        types.deinitTable(parser.root, gpa);
+        deinitTable(parser.root, gpa);
         gpa.destroy(parser.root);
         return e;
     };
