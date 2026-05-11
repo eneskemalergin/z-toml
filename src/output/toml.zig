@@ -57,29 +57,45 @@ fn writeDottedPrefix(w: *std.Io.Writer, path: [][]const u8) std.Io.Writer.Error!
 
 // ─── Value writers ─────────────────────────────────────────────────────────────
 
+fn needsEscape(c: u8) bool {
+    return switch (c) {
+        '"', '\\', 0x08, '\t', '\n', 0x0C, '\r', 0x1B => true,
+        0...7, 0xB, 0xE...0x1A, 0x1C...0x1F, 0x7F => true,
+        else => false,
+    };
+}
+
 fn writeBasicString(w: *std.Io.Writer, s: []const u8, opts: WriteOptions) std.Io.Writer.Error!void {
     try w.writeByte('"');
-    for (s) |c| switch (c) {
-        '"' => try w.writeAll("\\\""),
-        '\\' => try w.writeAll("\\\\"),
-        0x08 => try w.writeAll("\\b"),
-        '\t' => try w.writeAll("\\t"),
-        '\n' => try w.writeAll("\\n"),
-        0x0C => try w.writeAll("\\f"),
-        '\r' => try w.writeAll("\\r"),
-        0x1B => {
-            if (opts.use_escape_e) {
-                try w.writeAll("\\e");
-            } else {
-                try w.writeAll("\\u001B");
-            }
-        },
-        0...7, 0xB, 0xE...0x1A, 0x1C...0x1F, 0x7F => {
-            try w.writeAll("\\u00");
-            try w.print("{X:0>2}", .{c});
-        },
-        else => try w.writeByte(c),
-    };
+    var start: usize = 0;
+    for (s, 0..) |c, i| {
+        if (!needsEscape(c)) continue;
+        // Flush unescaped run before the escape point
+        if (i > start) try w.writeAll(s[start..i]);
+        switch (c) {
+            '"' => try w.writeAll("\\\""),
+            '\\' => try w.writeAll("\\\\"),
+            0x08 => try w.writeAll("\\b"),
+            '\t' => try w.writeAll("\\t"),
+            '\n' => try w.writeAll("\\n"),
+            0x0C => try w.writeAll("\\f"),
+            '\r' => try w.writeAll("\\r"),
+            0x1B => {
+                if (opts.use_escape_e) {
+                    try w.writeAll("\\e");
+                } else {
+                    try w.writeAll("\\u001B");
+                }
+            },
+            0...7, 0xB, 0xE...0x1A, 0x1C...0x1F, 0x7F => {
+                try w.writeAll("\\u00");
+                try w.print("{X:0>2}", .{c});
+            },
+            else => {},
+        }
+        start = i + 1;
+    }
+    if (s.len > start) try w.writeAll(s[start..]);
     try w.writeByte('"');
 }
 
@@ -194,23 +210,48 @@ fn isArrayOfTables(val: Value) bool {
 
 // ─── Key ordering ──────────────────────────────────────────────────────────────
 
-fn keyLessThan(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
+const EntryKind = enum(u2) {
+    /// String, integer, float, boolean, datetime, or non-AOT array.
+    plain,
+    /// Table where all values are scalars (inline-eligible).
+    inline_table,
+    /// Table with at least one non-scalar value.
+    table,
+    /// Array where all elements are tables.
+    aot,
+};
+
+const KeyValue = struct {
+    key: []const u8,
+    val: Value,
+    kind: EntryKind,
+};
+
+fn kvLessThan(_: void, a: KeyValue, b: KeyValue) bool {
+    return std.mem.order(u8, a.key, b.key) == .lt;
 }
 
-/// Collect all keys from `tbl`. Sorts alphabetically when `sort_keys`.
-fn keysOf(tbl: *Table, opts: WriteOptions, gpa: Allocator) Allocator.Error![][]const u8 {
+/// Collect key-value pairs from `tbl` with pre-computed entry kinds.
+/// Avoids hash lookups and duplicate `isInlineTable` calls during iteration.
+fn kvsOf(tbl: *Table, opts: WriteOptions, gpa: Allocator) Allocator.Error![]KeyValue {
     const count = tbl.count();
     if (count == 0) return &.{};
-    const keys = try gpa.alloc([]const u8, count);
+    const kvs = try gpa.alloc(KeyValue, count);
     var i: usize = 0;
     var it = tbl.iterator();
     while (it.next()) |entry| {
-        keys[i] = entry.key_ptr.*;
+        const val = entry.value_ptr.*;
+        const kind: EntryKind = switch (val) {
+            .string, .integer, .float, .boolean,
+            .offset_datetime, .local_datetime, .local_date, .local_time => .plain,
+            .array => if (isArrayOfTables(val)) .aot else .plain,
+            .table => |tbl2| if (!opts.prefer_headers and isInlineTable(tbl2)) .inline_table else .table,
+        };
+        kvs[i] = .{ .key = entry.key_ptr.*, .val = val, .kind = kind };
         i += 1;
     }
-    if (opts.sort_keys) std.sort.block([]const u8, keys, {}, keyLessThan);
-    return keys;
+    if (opts.sort_keys) std.sort.block(KeyValue, kvs, {}, kvLessThan);
+    return kvs;
 }
 
 // ─── Core serialization ────────────────────────────────────────────────────────
@@ -234,8 +275,8 @@ fn writeTableInner(
     gpa: Allocator,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
     var path_buf: [128][]const u8 = undefined;
-    const keys = try keysOf(tbl, opts, gpa);
-    defer if (keys.len > 0) gpa.free(keys);
+    const kvs = try kvsOf(tbl, opts, gpa);
+    defer if (kvs.len > 0) gpa.free(kvs);
 
     if (emit_header and path.len > 0) {
         try w.writeByte('[');
@@ -243,47 +284,32 @@ fn writeTableInner(
         try w.writeAll("]\n");
     }
 
-    // Pass 1: scalars, arrays, and inline tables
-    for (keys) |key| {
-        const val = tbl.get(key).?;
-        switch (val) {
-            .string, .integer, .float, .boolean,
-            .offset_datetime, .local_datetime, .local_date, .local_time => {
-                try writeKV(w, key, val, opts);
-            },
-            .array => {
-                if (!isArrayOfTables(val)) {
-                    try writeKV(w, key, val, opts);
-                }
-            },
-            .table => |sub_tbl| {
-                if (!opts.prefer_headers and isInlineTable(sub_tbl)) {
-                    try writeKV(w, key, val, opts);
-                }
-            },
+    // Pass 1: scalars and inline tables
+    for (kvs) |kv| {
+        switch (kv.kind) {
+            .plain, .inline_table => try writeKV(w, kv.key, kv.val, opts),
+            else => {},
         }
     }
 
     // Pass 2: nested tables (emit as [path.key] headers)
-    for (keys) |key| {
-        const val = tbl.get(key).?;
-        if (val == .table and (opts.prefer_headers or !isInlineTable(val.table))) {
+    for (kvs) |kv| {
+        if (kv.kind == .table) {
             try w.writeByte('\n');
             @memcpy(path_buf[0..path.len], path);
-            path_buf[path.len] = key;
+            path_buf[path.len] = kv.key;
             const child_path = path_buf[0 .. path.len + 1];
-            try writeTableInner(w, val.table, child_path, true, opts, gpa);
+            try writeTableInner(w, kv.val.table, child_path, true, opts, gpa);
         }
     }
 
     // Pass 3: arrays of tables
-    for (keys) |key| {
-        const val = tbl.get(key).?;
-        if (isArrayOfTables(val)) {
+    for (kvs) |kv| {
+        if (kv.kind == .aot) {
             @memcpy(path_buf[0..path.len], path);
-            path_buf[path.len] = key;
+            path_buf[path.len] = kv.key;
             const aot_path = path_buf[0 .. path.len + 1];
-            const arr = val.array;
+            const arr = kv.val.array;
             for (arr.items) |item| {
                 try w.writeByte('\n');
                 try w.writeAll("[[");

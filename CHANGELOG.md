@@ -9,16 +9,26 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ### Added
 
-- `toml.writeToml(value, writer)`: serialize a parsed `Value` tree back to `.toml` text. Uses `[header]` syntax for sub-tables and `[[...]]` for arrays of tables. All output is valid TOML v1.1.0.
-- `toml.writeTomlOpts(value, writer, opts, allocator)`: writeToml with `WriteOptions` for canonical output.
-- `toml.WriteOptions`: struct with `sort_keys: bool` — when true, keys are sorted alphabetically within each table for deterministic canonical output.
-- 15 `writeToml` round-trip tests: simple scalars, special floats, arrays, inline tables, dotted keys, AOTs, nested AOTs with sub-tables/sub-AOTs, datetime variants, empty document, quoted keys, mixed root/dotted tables, spec-example-1, proteomics (678-line real-world file).
-- 6 canonical formatter tests: insertion order preserved, sort_keys alphabetical, deterministic output, round-trip with sort_keys, nested table sorting, default opts matches writeToml.
-- Test suite is now 127 tests.
+- `toml.writeToml(value, writer)` — serialize a `Value` tree to valid TOML v1.1.0. Uses `[header]` syntax for sub-tables, `[[...]]` for AOTs, inline `{...}` for scalar-only tables. Round-trips correctly (`parseSlice` → `writeToml` → `parseSlice`).
+- `toml.writeTomlOpts(value, writer, opts, allocator)` — with `WriteOptions.sort_keys`, `.prefer_headers`, `.use_escape_e`.
+- `toml.WriteOptions` struct.
+- `tools/bench.zig` — inline benchmark via `zig build bench`.
+- `tools/bench_runner.zig` + `tools/zebrac` — hardware-counter profiling (instructions, cache misses, RSS).
+- `examples/pyproject_demo.zig` — end-to-end demo: parse `pyproject.toml` → JSON + round-trip TOML + canonical TOML. Run via `zig build pyproject`.
+- 15 writeToml round-trip tests, 6 formatter tests, 4 fidelity tests. Suite now 130+ tests.
 
 ### Changed
 
-- `build.zig.zon` version bumped to `0.2.0`.
+- **`Value.integer` → `IntValue{value, base}`** — hex `0xFF` now writes back as `0xFF` instead of `255`. Access `.integer.value` for `i64`.
+- `build.zig.zon` → `0.2.0`.
+- Performance improvements: basic string fast path (−3.1% parse instructions), batched string escaping in writer (−3.0% write instructions), KV pre-collection with EntryKind (−3.3% branch misses), ArrayList pre-allocation. Combined parse+write: 5.55M → 5.38M instructions (−3.1%). RSS unchanged at 1.07MB. No leaks.
+
+### Fixed
+
+- `path_buf[64]` overflow in writeTableInner (bumped to `[128]`).
+- AOT context-scoping bug: writer used dotted keys for sub-tables, breaking TOML context after `[[header]]`. Switched to `[header]` syntax for all sub-table navigation.
+- Arrays at root level silently dropped: Pass 1 didn't handle `.array` — added non-AOT array serialization.
+- Control chars in basic string fast path caused 5 invalid corpus files to parse successfully — added control-byte guard.
 
 ---
 

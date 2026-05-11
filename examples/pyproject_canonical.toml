@@ -1,0 +1,105 @@
+
+[build-system]
+build-backend = "flit_core.buildapi"
+requires = ["flit_core>=3.12,<4"]
+
+[project]
+classifiers = ["Operating System :: MacOS", "Operating System :: Microsoft :: Windows", "Operating System :: POSIX :: Linux", "Programming Language :: Python :: 3 :: Only", "Programming Language :: Python :: Implementation :: CPython", "Programming Language :: Python :: Implementation :: PyPy", "Topic :: Software Development :: Libraries :: Python Modules", "Typing :: Typed"]
+description = "A lil' TOML parser"
+keywords = ["toml"]
+license = "MIT"
+license-files = ["LICENSE"]
+name = "tomli"
+readme = "README.md"
+requires-python = ">=3.8"
+version = "2.4.1"
+
+[project.urls]
+Changelog = "https://github.com/hukkin/tomli/blob/master/CHANGELOG.md"
+Homepage = "https://github.com/hukkin/tomli"
+
+[[project.authors]]
+email = "hukkin@users.noreply.github.com"
+name = "Taneli Hukkinen"
+
+[tool]
+
+[tool.coverage]
+
+[tool.coverage.report]
+exclude_lines = ["# pragma: no cover\\b", "if TYPE_CHECKING:", "if __name__ == .__main__.:"]
+
+[tool.coverage.run]
+branch = true
+source = ["tomli"]
+
+[tool.isort]
+force_sort_within_sections = true
+known_first_party = ["tomli", "tests"]
+no_lines_before = ["LOCALFOLDER"]
+profile = "black"
+
+[tool.mypy]
+enable_error_code = ["ignore-without-code"]
+incremental = false
+local_partial_types = true
+show_error_codes = true
+strict = true
+strict_bytes = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+disallow_untyped_defs = false
+module = "tests.*"
+
+[[tool.mypy.overrides]]
+ignore_errors = true
+module = "run"
+
+[[tool.mypy.overrides]]
+ignore_errors = true
+module = "fuzz"
+
+[tool.tox]
+env_list = ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+requires = ["tox>=4.21.1"]
+
+[tool.tox.env]
+
+[tool.tox.env.benchmark]
+commands = [["python", "-c", "import datetime; print(datetime.date.today())"], ["python", "--version"], ["python", "benchmark/run.py"]]
+deps = ["-r benchmark/requirements.txt"]
+description = "run the benchmark script against a local Tomli version"
+
+[tool.tox.env.benchmark-import]
+commands = [["python", "-X", "importtime", "-c", "import tomli"]]
+description = "Measure module import times. Tox sends Python output to stderr, so to filter use e.g. `tox -e benchmark-import 2> >(grep tomli)`."
+
+[tool.tox.env.benchmark-pypi]
+commands = [["python", "-c", "import datetime; print(datetime.date.today())"], ["python", "--version"], ["python", "benchmark/run.py"]]
+deps = ["tomli", "-r benchmark/requirements.txt"]
+description = "run the benchmark script against the latest Tomli in PyPI"
+skip_install = true
+
+[tool.tox.env.fuzz]
+allowlist_externals = ["mkdir", "cp"]
+commands = [["mkdir", "-p", "{toxworkdir}/fuzzer-corpus"], ["cp", "-n", "benchmark/data.toml", "{toxworkdir}/fuzzer-corpus/data.toml"], ["python", "fuzzer/fuzz.py", "{toxworkdir}/fuzzer-corpus", {replace = "posargs", default = ["-len_control=10000"], extend = true}]]
+deps = ["-r fuzzer/requirements.txt"]
+description = "run the fuzzer against a local Tomli version (needs \"apt install clang\")"
+
+[tool.tox.env.pre-commit]
+commands = [["pre-commit", "run", {replace = "posargs", default = ["--all"], extend = true}]]
+deps = ["pre-commit"]
+description = "run linters"
+skip_install = true
+
+[tool.tox.env.profile]
+allowlist_externals = ["mkdir", "dot"]
+commands = [["mkdir", "-p", "{toxworkdir}/prof"], ["python", "-m", "cProfile", "-o", "{toxworkdir}/prof/output.pstats", "profiler/profiler_script.py"], ["gprof2dot", "-f", "pstats", "-o", "{toxworkdir}/prof/output.dot", "{toxworkdir}/prof/output.pstats"], ["dot", "-Tsvg", "-o", "{toxworkdir}/prof/output.svg", "{toxworkdir}/prof/output.dot"], ["python", "-c", "import pathlib; print(\"profiler svg output under file://\\{0\\}\".format(pathlib.Path(r\"{toxworkdir}\") / \"prof\" / \"output.svg\"))"]]
+deps = ["-r profiler/requirements.txt"]
+description = "run profiler (use e.g. `firefox .tox/prof/output.svg` to open)"
+
+[tool.tox.env_run_base]
+commands = [["python", "-m", "unittest", {replace = "posargs", extend = true}]]
+description = "run tests against a built package under {base_python}"
+pass_env = ["TOMLI_USE_MYPYC"]

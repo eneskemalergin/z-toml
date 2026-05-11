@@ -269,8 +269,27 @@ const Parser = struct {
 
     fn parseBasicStringRaw(self: *Parser) ParseError![]u8 {
         try self.expect('"');
+        // Fast path: scan for control chars, escape, or newline before `"`.
+        // Most strings lack escapes — avoids ArrayList + byte-by-byte append.
+        {
+            const start = self.pos;
+            var i: usize = 0;
+            while (true) {
+                const c = self.peekAt(i) orelse return self.fail("unterminated string", .{});
+                if (c == '"') {
+                    self.pos += i;
+                    try self.expect('"');
+                    return try self.gpa.dupe(u8, self.input[start .. self.pos - 1]);
+                }
+                // Escape, newline, or control char → fall back to slow path.
+                if (c == '\\' or c == '\r' or c == '\n' or (c < 0x20 and c != '\t') or c == 0x7F) break;
+                i += 1;
+            }
+        }
+        // Slow path: has escapes — pre-allocate capacity (output ≤ remaining input).
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.gpa);
+        try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
         try self.parseBasicStringContents(&buf);
         try self.expect('"');
         return buf.toOwnedSlice(self.gpa) catch error.OutOfMemory;
@@ -285,6 +304,7 @@ const Parser = struct {
         _ = self.eat('\n');
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.gpa);
+        try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
         outer: while (true) {
             const c = self.peek() orelse return self.fail("unterminated multi-line {s} string", .{if (basic) "basic" else "literal"});
             if (c == delim) {

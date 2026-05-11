@@ -52,6 +52,49 @@ pub fn build(b: *std.Build) void {
 
     const run_proteomics = b.addRunArtifact(proteomics_exe);
 
+    const pyproject_exe = b.addExecutable(.{
+        .name = "pyproject-demo",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/pyproject_demo.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "toml", .module = toml_module },
+            },
+        }),
+    });
+
+    const run_pyproject = b.addRunArtifact(pyproject_exe);
+    b.step("pyproject", "Parse pyproject.toml, output JSON + TOML").dependOn(&run_pyproject.step);
+
+    const bench_exe = b.addExecutable(.{
+        .name = "bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/bench.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "toml", .module = toml_module },
+            },
+        }),
+    });
+    const run_bench = b.addRunArtifact(bench_exe);
+    b.step("bench", "Run benchmarks").dependOn(&run_bench.step);
+
+    const bench_runner = b.addExecutable(.{
+        .name = "bench-runner",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/bench_runner.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "toml", .module = toml_module },
+            },
+        }),
+    });
+    const install_runner = b.addInstallArtifact(bench_runner, .{});
+    b.step("install-bench", "Install bench-runner to zig-out/bin").dependOn(&install_runner.step);
+
     const fuzz_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/fuzz.zig"),
