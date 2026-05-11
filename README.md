@@ -134,7 +134,7 @@ pub fn main() !void {
     // root is *toml.Table. Free with toml.deinit(root, gpa) or deinit the arena.
 
     const title = root.get("title").?.string;
-    const port  = root.get("database").?.table.get("port").?.integer;
+    const port  = root.get("database").?.table.get("port").?.integer.value;
     _ = title;
     _ = port;
 }
@@ -293,7 +293,7 @@ pub const ErrorInfo = struct {
 | TOML type        | Field              | Zig type                                      |
 | ---------------- | ------------------ | --------------------------------------------- |
 | String           | `.string`          | `[]const u8`                                  |
-| Integer          | `.integer`         | `i64`                                         |
+| Integer          | `.integer`         | `IntValue` (`.value: i64`, `.base: Base`)     |
 | Float            | `.float`           | `f64`                                         |
 | Boolean          | `.boolean`         | `bool`                                        |
 | Offset Date-Time | `.offset_datetime` | `OffsetDateTime`                              |

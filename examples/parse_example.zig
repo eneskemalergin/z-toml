@@ -110,7 +110,7 @@ fn writeValue(writer: anytype, value: toml.Value, depth: usize) anyerror!void {
         .string => |s| try writeTypedScalar(writer, "string", s, depth),
         .integer => |v| {
             var buf: [32]u8 = undefined;
-            try writeTypedScalar(writer, "integer", std.fmt.bufPrint(&buf, "{d}", .{v}) catch "", depth);
+            try writeTypedScalar(writer, "integer", std.fmt.bufPrint(&buf, "{d}", .{v.value}) catch "", depth);
         },
         .float => |v| {
             if (std.math.isNan(v)) {

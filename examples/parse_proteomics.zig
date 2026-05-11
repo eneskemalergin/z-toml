@@ -21,7 +21,7 @@ fn printTable(w: anytype, tbl: *toml.Table, indent: usize) !void {
         try printKey(w, indent, key);
         switch (val) {
             .string => |s| try printScalar(w, "32", "\"{s}\"", .{s}),
-            .integer => |v| try printScalar(w, "33", "{d}", .{v}),
+            .integer => |v| try printScalar(w, "33", "{d}", .{v.value}),
             .float => |v| try printScalar(w, "35", "{d}", .{v}),
             .boolean => |v| try printScalar(w, "33", "{s}", .{if (v) "true" else "false"}),
             .offset_datetime => |v| try printScalar(w, "34", "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}{s:d:0>2}:{d:0>2}", .{ v.date.year, v.date.month, v.date.day, v.time.hour, v.time.minute, v.time.second, if (v.offset_minutes < 0) '-' else '+', @abs(@divTrunc(v.offset_minutes, 60)), @abs(@mod(v.offset_minutes, 60)) }),
@@ -35,7 +35,7 @@ fn printTable(w: anytype, tbl: *toml.Table, indent: usize) !void {
                         if (i > 0) try w.writeAll(", ");
                         switch (item) {
                             .string => |s| try w.print("\"{s}\"", .{s}),
-                            .integer => |v| try w.print("{d}", .{v}),
+                            .integer => |v| try w.print("{d}", .{v.value}),
                             .float => |v| try w.print("{d}", .{v}),
                             .boolean => |v| try w.print("{s}", .{if (v) "true" else "false"}),
                             else => try w.writeAll("..."),
@@ -102,11 +102,11 @@ pub fn main(init: std.process.Init) !void {
     try w.print("\x1b[1;4;36mSAMPLES\x1b[0m\n", .{});
     const samples = root.get("samples").?.table;
     try printKey(w, 1, "total_samples");
-    try printScalar(w, "33", "{d}", .{samples.get("total_samples").?.integer});
+    try printScalar(w, "33", "{d}", .{samples.get("total_samples").?.integer.value});
     try printKey(w, 1, "biological_replicates (hex)");
-    try printScalar(w, "33", "{d}", .{samples.get("biological_replicates").?.integer});
+    try printScalar(w, "33", "{d}", .{samples.get("biological_replicates").?.integer.value});
     try printKey(w, 1, "well_volume_nl");
-    try printScalar(w, "33", "{d}", .{samples.get("well_volume_nl").?.integer});
+    try printScalar(w, "33", "{d}", .{samples.get("well_volume_nl").?.integer.value});
     try printKey(w, 1, "target_mass_accuracy");
     try printScalar(w, "35", "{d}", .{samples.get("target_mass_accuracy").?.float});
     try w.writeAll("\n");
@@ -121,7 +121,7 @@ pub fn main(init: std.process.Init) !void {
         try w.print("  \x1b[33m• {s}\x1b[0m ({d}°C, {d}h, {d} samples)\n", .{
             c.get("name").?.string,
             @as(i64, @intFromFloat(c.get("temperature").?.float)),
-            c.get("duration_h").?.integer,
+            c.get("duration_h").?.integer.value,
             c.get("sample_ids").?.array.items.len,
         });
     }
@@ -136,7 +136,7 @@ pub fn main(init: std.process.Init) !void {
     try printScalar(w, "32", "\"{s}\"", .{instrument.get("model").?.string});
     const inst_settings = instrument.get("settings").?.table;
     try printKey(w, 1, "resolution");
-    try printScalar(w, "33", "{d}", .{inst_settings.get("resolution").?.integer});
+    try printScalar(w, "33", "{d}", .{inst_settings.get("resolution").?.integer.value});
     try printKey(w, 1, "acquisition_modes");
     try printScalar(w, "33", "{d} modes", .{inst_settings.get("acquisition_modes").?.array.items.len});
     try w.writeAll("\n");
@@ -196,9 +196,9 @@ pub fn main(init: std.process.Init) !void {
     try w.print("\x1b[1;4;36mCOMPUTING\x1b[0m\n", .{});
     const comp = root.get("computing").?.table;
     try printKey(w, 1, "max_memory_mb");
-    try printScalar(w, "33", "{d}", .{comp.get("max_memory_mb").?.integer});
+    try printScalar(w, "33", "{d}", .{comp.get("max_memory_mb").?.integer.value});
     try printKey(w, 1, "threads");
-    try printScalar(w, "33", "{d}", .{comp.get("threads").?.integer});
+    try printScalar(w, "33", "{d}", .{comp.get("threads").?.integer.value});
     const cluster = comp.get("cluster").?.table;
     const jobs = cluster.get("jobs").?.array;
     try printKey(w, 1, "cluster jobs");
@@ -208,8 +208,8 @@ pub fn main(init: std.process.Init) !void {
         try printIndent(w, 2);
         try w.print("  • \x1b[33m{s}\x1b[0m ({d} CPUs, {d} GB, {s})\n", .{
             j.get("name").?.string,
-            j.get("cpus").?.integer,
-            j.get("memory_gb").?.integer,
+            j.get("cpus").?.integer.value,
+            j.get("memory_gb").?.integer.value,
             j.get("walltime").?.string,
         });
     }
@@ -224,7 +224,7 @@ pub fn main(init: std.process.Init) !void {
         const s = step.table;
         try printIndent(w, 2);
         try w.print("  \x1b[33mStep {d}: {s}\x1b[0m → {s}\n", .{
-            s.get("step").?.integer,
+            s.get("step").?.integer.value,
             s.get("name").?.string,
             s.get("output").?.string,
         });
