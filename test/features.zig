@@ -835,3 +835,160 @@ test "fromToml: hook on root struct fires instead of mapTable" {
     const cfg = try toml.parseInto(RootCustom, arena.allocator(), "my_title = \"custom mapping\"", null);
     try std.testing.expectEqualStrings("custom mapping", cfg.title);
 }
+
+// ─── toJson tests ──────────────────────────────────────────────────────────────
+
+fn toJsonInBuf(value: toml.Value, buf: *[4096]u8) []const u8 {
+    var w = std.Io.Writer.fixed(buf);
+    toml.toJson(value, &w) catch unreachable;
+    return w.buffered();
+}
+
+test "toJson: string" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("\"hello\"", toJsonInBuf(.{ .string = "hello" }, &buf));
+}
+
+test "toJson: string with escapes" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\nd\\te\"", toJsonInBuf(.{ .string = "a\"b\\c\nd\te" }, &buf));
+}
+
+test "toJson: integer" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("42", toJsonInBuf(.{ .integer = 42 }, &buf));
+    try std.testing.expectEqualStrings("-7", toJsonInBuf(.{ .integer = -7 }, &buf));
+}
+
+test "toJson: float" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("3.14", toJsonInBuf(.{ .float = 3.14 }, &buf));
+}
+
+test "toJson: float nan becomes null" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("null", toJsonInBuf(.{ .float = std.math.nan(f64) }, &buf));
+}
+
+test "toJson: float inf becomes null" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("null", toJsonInBuf(.{ .float = std.math.inf(f64) }, &buf));
+    try std.testing.expectEqualStrings("null", toJsonInBuf(.{ .float = -std.math.inf(f64) }, &buf));
+}
+
+test "toJson: boolean" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("true", toJsonInBuf(.{ .boolean = true }, &buf));
+    try std.testing.expectEqualStrings("false", toJsonInBuf(.{ .boolean = false }, &buf));
+}
+
+test "toJson: offset datetime" {
+    var buf: [4096]u8 = undefined;
+    const dt = toml.OffsetDateTime{
+        .date = .{ .year = 1979, .month = 5, .day = 27 },
+        .time = .{ .hour = 7, .minute = 32, .second = 0, .nanosecond = 0 },
+        .offset_minutes = 0,
+    };
+    try std.testing.expectEqualStrings("\"1979-05-27T07:32:00Z\"", toJsonInBuf(.{ .offset_datetime = dt }, &buf));
+}
+
+test "toJson: offset datetime with non-zero offset" {
+    var buf: [4096]u8 = undefined;
+    const dt = toml.OffsetDateTime{
+        .date = .{ .year = 1979, .month = 5, .day = 27 },
+        .time = .{ .hour = 7, .minute = 32, .second = 0, .nanosecond = 0 },
+        .offset_minutes = -420,
+    };
+    try std.testing.expectEqualStrings("\"1979-05-27T07:32:00-07:00\"", toJsonInBuf(.{ .offset_datetime = dt }, &buf));
+}
+
+test "toJson: local datetime" {
+    var buf: [4096]u8 = undefined;
+    const dt = toml.LocalDateTime{
+        .date = .{ .year = 2024, .month = 1, .day = 15 },
+        .time = .{ .hour = 14, .minute = 30, .second = 0, .nanosecond = 0 },
+    };
+    try std.testing.expectEqualStrings("\"2024-01-15T14:30:00\"", toJsonInBuf(.{ .local_datetime = dt }, &buf));
+}
+
+test "toJson: local date" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("\"2024-01-15\"", toJsonInBuf(.{ .local_date = .{ .year = 2024, .month = 1, .day = 15 } }, &buf));
+}
+
+test "toJson: local time" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("\"07:32:00\"", toJsonInBuf(.{ .local_time = .{ .hour = 7, .minute = 32, .second = 0, .nanosecond = 0 } }, &buf));
+}
+
+test "toJson: local time with nanoseconds" {
+    var buf: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings("\"07:32:00.5\"", toJsonInBuf(.{ .local_time = .{ .hour = 7, .minute = 32, .second = 0, .nanosecond = 500_000_000 } }, &buf));
+}
+
+test "toJson: empty array" {
+    var buf: [4096]u8 = undefined;
+    const gpa = std.testing.allocator;
+    const heap_arr = try gpa.create(std.ArrayList(toml.Value));
+    heap_arr.* = .empty;
+    defer {
+        heap_arr.deinit(gpa);
+        gpa.destroy(heap_arr);
+    }
+    try std.testing.expectEqualStrings("[]", toJsonInBuf(.{ .array = heap_arr }, &buf));
+}
+
+test "toJson: integer array" {
+    var buf: [4096]u8 = undefined;
+    const gpa = std.testing.allocator;
+    const heap_arr = try gpa.create(std.ArrayList(toml.Value));
+    heap_arr.* = .empty;
+    defer {
+        heap_arr.deinit(gpa);
+        gpa.destroy(heap_arr);
+    }
+    try heap_arr.append(gpa, .{ .integer = 1 });
+    try heap_arr.append(gpa, .{ .integer = 2 });
+    try heap_arr.append(gpa, .{ .integer = 3 });
+    try std.testing.expectEqualStrings("[1,2,3]", toJsonInBuf(.{ .array = heap_arr }, &buf));
+}
+
+test "toJson: empty table" {
+    var buf: [4096]u8 = undefined;
+    const gpa = std.testing.allocator;
+    const heap_tbl = try gpa.create(std.array_hash_map.String(toml.Value));
+    heap_tbl.* = .empty;
+    defer {
+        heap_tbl.deinit(gpa);
+        gpa.destroy(heap_tbl);
+    }
+    try std.testing.expectEqualStrings("{}", toJsonInBuf(.{ .table = heap_tbl }, &buf));
+}
+
+test "toJson: table with values" {
+    var buf: [4096]u8 = undefined;
+    const gpa = std.testing.allocator;
+    const heap_tbl = try gpa.create(std.array_hash_map.String(toml.Value));
+    heap_tbl.* = .empty;
+    defer {
+        heap_tbl.deinit(gpa);
+        gpa.destroy(heap_tbl);
+    }
+    try heap_tbl.put(gpa, "name", .{ .string = "test" });
+    try heap_tbl.put(gpa, "count", .{ .integer = 99 });
+    try std.testing.expectEqualStrings("{\"name\":\"test\",\"count\":99}", toJsonInBuf(.{ .table = heap_tbl }, &buf));
+}
+
+test "toJson: round trip parseSlice -> toJson" {
+    const gpa = std.testing.allocator;
+    const src = "title = \"hello\"\ncount = 42\nenabled = true\npi = 3.14";
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    var buf: [4096]u8 = undefined;
+    const json = toJsonInBuf(.{ .table = root }, &buf);
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"title\":\"hello\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"count\":42"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"enabled\":true"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, json, 1, "\"pi\":3.14"));
+}

@@ -5,6 +5,20 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
+## [0.1.4] - 2026-05-11
+
+### Added
+
+- `toml.toJson(value, writer)`: serialize a parsed `Value` tree to JSON text. Recursive walker covering all 10 `Value` variants. Datetimes become ISO 8601 strings. NaN/Inf floats become JSON `null`. Table keys are emitted in TOML insertion order.
+- 18 `toJson` unit tests: string (with escapes), integer, float, NaN/Inf → null, boolean, all four datetime types, empty/mixed arrays, empty/populated tables, round-trip parseSlice→toJson verification.
+- Test suite is now 100 tests (82 original + 18 toJson).
+
+### Changed
+
+- `build.zig.zon` version bumped to `0.1.4`.
+
+---
+
 ## [0.1.3] - 2026-05-11
 
 ### Added

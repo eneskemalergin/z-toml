@@ -9,6 +9,7 @@ const std = @import("std");
 const types = @import("value.zig");
 const parser_mod = @import("parser.zig");
 const typed_mod = @import("static.zig");
+const json_output = @import("output/json.zig");
 
 // ─── Re-export public types ───────────────────────────────────────────────────
 
@@ -62,3 +63,9 @@ pub fn parseInto(
 ) ParseIntoError!T {
     return typed_mod.parseInto(T, gpa, input, err_info);
 }
+
+/// Serialize a parsed `Value` tree as JSON to `w`.
+///
+/// NaN/Inf floats become JSON `null`. Datetimes are ISO 8601 strings.
+/// Table key order matches TOML insertion order.
+pub const toJson = json_output.toJson;

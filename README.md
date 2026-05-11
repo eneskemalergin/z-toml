@@ -24,6 +24,7 @@
 - Full TOML 1.1.0 coverage: all value types, dotted keys, inline tables, arrays of tables, multi-line strings, escape sequences, date/time types
 - `parseInto(T)`: map TOML directly onto a Zig struct with comptime reflection. No manual tree walking.
 - `parseSlice`: dynamic tree API for unknown-shape documents
+- `toJson`: serialize a parsed tree to JSON
 - Validated against the [toml-lang/toml-test](https://github.com/toml-lang/toml-test) corpus (215 valid + 467 invalid files)
 - Clear error messages with line and column numbers
 - No dependencies beyond the Zig standard library
@@ -39,7 +40,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .z_toml = .{
-        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.3.tar.gz",
+        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.4.tar.gz",
         .hash = "<run zig fetch to get the hash>",
     },
 },
@@ -48,7 +49,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 Or use `zig fetch` to add it automatically:
 
 ```sh
-zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.3.tar.gz
+zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.4.tar.gz
 ```
 
 Then wire it up in your `build.zig`:
@@ -215,6 +216,21 @@ pub fn deinit(table: *Table, gpa: std.mem.Allocator) void
 
 Recursively frees all memory owned by `table` and destroys the table pointer itself. Skip this if you used an `ArenaAllocator`. Just deinit the arena.
 
+### `toJson`
+
+```zig
+pub fn toJson(value: Value, w: *std.Io.Writer) std.Io.Writer.Error!void
+```
+
+Serializes a parsed `Value` tree as JSON to `w`. NaN/Inf floats become `null`. Datetimes are ISO 8601 strings. Table keys are emitted in TOML insertion order.
+
+```zig
+var buf: [4096]u8 = undefined;
+var w = std.Io.Writer.fixed(&buf);
+try toml.toJson(root_value, &w);
+std.debug.print("{s}\n", .{w.buffered()});
+```
+
 ### `ErrorInfo`
 
 ```zig
@@ -276,7 +292,7 @@ Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that 
 zig build test
 ```
 
-Runs 82 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
+Runs 100 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
 ## Build steps
 
@@ -291,7 +307,6 @@ Runs 82 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus
 
 | Version    | Feature                 | Notes                                                                                                                                    |
 | ---------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **v0.1.4** | `toJson` output         | Convert a parsed `Value` tree to JSON. No external dependency.                                                                           |
 | **v0.2.0** | `writeToml` serializer  | Write a `Value` tree or typed struct back to `.toml` text. First write-path capability.                                                  |
 | **v0.2.1** | Canonical formatter     | Pretty-print a `Value` tree to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand.                |
 | **v0.3.0** | Zero-copy strings       | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep input alive. |
