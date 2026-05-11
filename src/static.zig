@@ -100,12 +100,12 @@ fn mapValue(comptime T: type, value: Value, gpa: Allocator) ParseIntoError!T {
         },
         .int => {
             if (value != .integer) return error.TypeMismatch;
-            return std.math.cast(T, value.integer) orelse error.TypeMismatch;
+            return std.math.cast(T, value.integer.value) orelse error.TypeMismatch;
         },
         .float => {
             return switch (value) {
                 .float => @floatCast(value.float),
-                .integer => @floatFromInt(value.integer),
+                .integer => @floatFromInt(value.integer.value),
                 else => error.TypeMismatch,
             };
         },

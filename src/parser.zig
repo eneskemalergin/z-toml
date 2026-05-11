@@ -687,7 +687,8 @@ const Parser = struct {
         var buf: [72]u8 = undefined;
         const numstr = try self.sanitizedNumber(start, self.pos, &buf);
         const v = std.fmt.parseInt(i64, numstr, base) catch return self.fail("invalid {s} integer", .{prefix});
-        return .{ .integer = v };
+        const int_base: types.Base = if (prefix[1] == 'x') .hex else if (prefix[1] == 'o') .octal else .binary;
+        return .{ .integer = .{ .value = v, .base = int_base } };
     }
 
     fn parseIntOrFloat(self: *Parser) ParseError!Value {
@@ -741,7 +742,8 @@ const Parser = struct {
         } else {
             const s = if (numstr[0] == '+' or numstr[0] == '-') numstr[1..] else numstr;
             if (s.len > 1 and s[0] == '0') return self.fail("leading zeros in integer", .{});
-            return .{ .integer = std.fmt.parseInt(i64, numstr, 10) catch return self.fail("invalid integer '{s}'", .{numstr}) };
+            const dec = std.fmt.parseInt(i64, numstr, 10) catch return self.fail("invalid integer '{s}'", .{numstr});
+            return .{ .integer = .{ .value = dec } };
         }
     }
 

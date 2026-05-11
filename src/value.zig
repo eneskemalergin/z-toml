@@ -42,11 +42,22 @@ pub const OffsetDateTime = struct {
     offset_minutes: i16,
 };
 
+// ─── Integer formatting ──────────────────────────────────────────────────────
+
+/// Base in which an integer literal was written.
+pub const Base = enum(u2) { decimal, hex, octal, binary };
+
+/// Integer value with original base preserved for canonical output.
+pub const IntValue = struct {
+    value: i64,
+    base: Base = .decimal,
+};
+
 // ─── Core Value type ────────────────────────────────────────────────────────
 
 pub const Value = union(enum) {
     string: []const u8,
-    integer: i64,
+    integer: IntValue,
     float: f64,
     boolean: bool,
     offset_datetime: OffsetDateTime,

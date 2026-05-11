@@ -125,7 +125,7 @@ fn compareScalar(actual: toml.Value, expected: TypedScalar, path: []const u8) Co
             std.debug.print("\nvalid corpus fixture error: {s} has invalid integer JSON {s}\n", .{ path, expected.value });
             return error.Mismatch;
         };
-        if (actual != .integer or actual.integer != want) {
+        if (actual != .integer or actual.integer.value != want) {
             std.debug.print("\nvalid corpus mismatch: {s} expected integer {s}\n", .{ path, expected.value });
             return error.Mismatch;
         }

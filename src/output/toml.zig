@@ -108,7 +108,14 @@ fn writeLocalTime(w: *std.Io.Writer, t: types.LocalTime) std.Io.Writer.Error!voi
 fn writeValue(w: *std.Io.Writer, val: Value, opts: WriteOptions) std.Io.Writer.Error!void {
     switch (val) {
         .string => |s| try writeBasicString(w, s, opts),
-        .integer => |i| try w.print("{}", .{i}),
+        .integer => |iv| {
+            switch (iv.base) {
+                .decimal => try w.print("{}", .{iv.value}),
+                .hex => try w.print("0x{X}", .{@as(u64, @bitCast(iv.value))}),
+                .octal => try w.print("0o{o}", .{@as(u64, @bitCast(iv.value))}),
+                .binary => try w.print("0b{b}", .{@as(u64, @bitCast(iv.value))}),
+            }
+        },
         .float => |f| {
             if (std.math.isNan(f)) return w.writeAll("nan");
             if (std.math.isInf(f)) {

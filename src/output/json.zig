@@ -57,7 +57,7 @@ pub fn toJson(value: Value, w: *std.Io.Writer) std.Io.Writer.Error!void {
             try writeJsonString(w, s);
             try w.writeByte('"');
         },
-        .integer => |i| try w.print("{}", .{i}),
+        .integer => |iv| try w.print("{}", .{iv.value}),
         .float => |f| {
             if (std.math.isNan(f) or std.math.isInf(f))
                 try w.writeAll("null")

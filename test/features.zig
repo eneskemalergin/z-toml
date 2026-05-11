@@ -23,7 +23,7 @@ test "simple key/value" {
     defer toml.deinit(root, gpa);
 
     try std.testing.expectEqualStrings("TOML Example", root.get("title").?.string);
-    try std.testing.expectEqual(@as(i64, 42), root.get("count").?.integer);
+    try std.testing.expectEqual(@as(i64, 42), root.get("count").?.integer.value);
     try std.testing.expectEqual(true, root.get("flag").?.boolean);
     try std.testing.expectApproxEqAbs(@as(f64, 3.14), root.get("pi").?.float, 1e-10);
 }
@@ -55,7 +55,7 @@ test "table header" {
     defer toml.deinit(root, gpa);
 
     try std.testing.expectEqualStrings("Tom", root.get("owner").?.table.get("name").?.string);
-    try std.testing.expectEqual(@as(i64, 5432), root.get("database").?.table.get("port").?.integer);
+    try std.testing.expectEqual(@as(i64, 5432), root.get("database").?.table.get("port").?.integer.value);
 }
 
 test "array of tables" {
@@ -85,8 +85,8 @@ test "inline table" {
     defer toml.deinit(root, gpa);
 
     const pt = root.get("point").?.table;
-    try std.testing.expectEqual(@as(i64, 1), pt.get("x").?.integer);
-    try std.testing.expectEqual(@as(i64, 2), pt.get("y").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), pt.get("x").?.integer.value);
+    try std.testing.expectEqual(@as(i64, 2), pt.get("y").?.integer.value);
 }
 
 test "string escapes" {
@@ -108,9 +108,9 @@ test "integer bases" {
     ;
     const root = try toml.parseSlice(gpa, src, null);
     defer toml.deinit(root, gpa);
-    try std.testing.expectEqual(@as(i64, 0xDEAD), root.get("h").?.integer);
-    try std.testing.expectEqual(@as(i64, 0o755), root.get("o").?.integer);
-    try std.testing.expectEqual(@as(i64, 0b1010), root.get("b").?.integer);
+    try std.testing.expectEqual(@as(i64, 0xDEAD), root.get("h").?.integer.value);
+    try std.testing.expectEqual(@as(i64, 0o755), root.get("o").?.integer.value);
+    try std.testing.expectEqual(@as(i64, 0b1010), root.get("b").?.integer.value);
 }
 
 test "float specials" {
@@ -200,7 +200,7 @@ test "array mixed" {
     defer toml.deinit(root, gpa);
     const arr = root.get("x").?.array;
     try std.testing.expectEqual(@as(usize, 3), arr.items.len);
-    try std.testing.expectEqual(@as(i64, 1), arr.items[0].integer);
+    try std.testing.expectEqual(@as(i64, 1), arr.items[0].integer.value);
 }
 
 test "super-table defined after sub-table" {
@@ -213,7 +213,7 @@ test "super-table defined after sub-table" {
     ;
     const root = try toml.parseSlice(gpa, src, null);
     defer toml.deinit(root, gpa);
-    try std.testing.expectEqual(@as(i64, 2), root.get("x").?.table.get("other").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), root.get("x").?.table.get("other").?.integer.value);
 }
 
 test "invalid duplicate key" {
@@ -320,9 +320,9 @@ test "proteomics.toml parses successfully" {
 
     // Samples: integer formats
     const samples = root.get("samples").?.table;
-    try std.testing.expectEqual(@as(i64, 96), samples.get("total_samples").?.integer);
-    try std.testing.expectEqual(@as(i64, 24), samples.get("biological_replicates").?.integer); // 0x18
-    try std.testing.expectEqual(@as(i64, 0b11000000), samples.get("control_group_mask").?.integer);
+    try std.testing.expectEqual(@as(i64, 96), samples.get("total_samples").?.integer.value);
+    try std.testing.expectEqual(@as(i64, 24), samples.get("biological_replicates").?.integer.value); // 0x18
+    try std.testing.expectEqual(@as(i64, 0b11000000), samples.get("control_group_mask").?.integer.value);
 
     // Float specials
     try std.testing.expect(std.math.isInf(samples.get("special_threshold").?.float));
@@ -337,7 +337,7 @@ test "proteomics.toml parses successfully" {
     // Instrument: nested settings
     const instrument = root.get("instrument").?.table;
     const inst_settings = instrument.get("settings").?.table;
-    try std.testing.expectEqual(@as(i64, 120000), inst_settings.get("resolution").?.integer);
+    try std.testing.expectEqual(@as(i64, 120000), inst_settings.get("resolution").?.integer.value);
 
     // Ionization sub-table
     const ionization = inst_settings.get("ionization").?.table;
@@ -389,12 +389,12 @@ test "proteomics.toml parses successfully" {
     const custom = root.get("user.custom-settings").?.table;
     try std.testing.expectEqual(false, custom.get("enable_debug").?.boolean);
     const nested = custom.get("nested").?.table;
-    try std.testing.expectEqual(@as(i64, 42), nested.get("number").?.integer);
-    try std.testing.expectEqual(@as(i64, 0xDEADBEEF), nested.get("magic").?.integer);
+    try std.testing.expectEqual(@as(i64, 42), nested.get("number").?.integer.value);
+    try std.testing.expectEqual(@as(i64, 0xDEADBEEF), nested.get("magic").?.integer.value);
 
     // Deep nested table via quoted+dotted key in header
     const deep = nested.get("deep").?.table;
-    try std.testing.expectEqual(@as(i64, 3), deep.get("level").?.integer);
+    try std.testing.expectEqual(@as(i64, 3), deep.get("level").?.integer.value);
     try std.testing.expectEqual(true, deep.get("active").?.boolean);
 
     // Enrichment
@@ -738,8 +738,8 @@ test "fromToml: error returned from hook maps to TypeMismatch" {
         x: i64,
         pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
             _ = allocator;
-            if (v.integer <= 0) return error.NegativeValue;
-            return @This(){ .x = v.integer };
+            if (v.integer.value <= 0) return error.NegativeValue;
+            return @This(){ .x = v.integer.value };
         }
     };
     const Config = struct { val: NeverPositive };
@@ -804,7 +804,7 @@ test "fromToml: slice []MyFromTomlType" {
         inner: i64,
         pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
             _ = allocator;
-            return @This(){ .inner = v.integer };
+            return @This(){ .inner = v.integer.value };
         }
     };
     const Config = struct { nums: []Wrapper };
@@ -856,8 +856,8 @@ test "toJson: string with escapes" {
 
 test "toJson: integer" {
     var buf: [4096]u8 = undefined;
-    try std.testing.expectEqualStrings("42", toJsonInBuf(.{ .integer = 42 }, &buf));
-    try std.testing.expectEqualStrings("-7", toJsonInBuf(.{ .integer = -7 }, &buf));
+    try std.testing.expectEqualStrings("42", toJsonInBuf(.{ .integer = .{ .value = 42 } }, &buf));
+    try std.testing.expectEqualStrings("-7", toJsonInBuf(.{ .integer = .{ .value = -7 } }, &buf));
 }
 
 test "toJson: float" {
@@ -947,9 +947,9 @@ test "toJson: integer array" {
         heap_arr.deinit(gpa);
         gpa.destroy(heap_arr);
     }
-    try heap_arr.append(gpa, .{ .integer = 1 });
-    try heap_arr.append(gpa, .{ .integer = 2 });
-    try heap_arr.append(gpa, .{ .integer = 3 });
+    try heap_arr.append(gpa, .{ .integer = .{ .value = 1 } });
+    try heap_arr.append(gpa, .{ .integer = .{ .value = 2 } });
+    try heap_arr.append(gpa, .{ .integer = .{ .value = 3 } });
     try std.testing.expectEqualStrings("[1,2,3]", toJsonInBuf(.{ .array = heap_arr }, &buf));
 }
 
@@ -975,7 +975,7 @@ test "toJson: table with values" {
         gpa.destroy(heap_tbl);
     }
     try heap_tbl.put(gpa, "name", .{ .string = "test" });
-    try heap_tbl.put(gpa, "count", .{ .integer = 99 });
+    try heap_tbl.put(gpa, "count", .{ .integer = .{ .value = 99 } });
     try std.testing.expectEqualStrings("{\"name\":\"test\",\"count\":99}", toJsonInBuf(.{ .table = heap_tbl }, &buf));
 }
 
@@ -998,7 +998,7 @@ test "toJson: round trip parseSlice -> toJson" {
 fn valuesEqual(a: toml.Value, b: toml.Value) bool {
     switch (a) {
         .string => return b == .string and std.mem.eql(u8, a.string, b.string),
-        .integer => return b == .integer and a.integer == b.integer,
+        .integer => return b == .integer and a.integer.value == b.integer.value,
         .float => {
             if (b != .float) return false;
             if (std.math.isNan(a.float)) return std.math.isNan(b.float);
