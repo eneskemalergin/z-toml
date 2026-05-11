@@ -1,3 +1,7 @@
+//! Corpus-backed tests: validates the parser against the toml-lang/toml-test
+//! manifest (215 valid + 467 invalid files). Also runs `parseInto` sweeps and
+//! an exact-field fixture test against spec-example-1.
+
 const std = @import("std");
 const toml = @import("toml");
 const json = std.json;

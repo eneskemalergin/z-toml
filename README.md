@@ -39,7 +39,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .z_toml = .{
-        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.2.tar.gz",
+        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.3.tar.gz",
         .hash = "<run zig fetch to get the hash>",
     },
 },
@@ -48,7 +48,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 Or use `zig fetch` to add it automatically:
 
 ```sh
-zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.2.tar.gz
+zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.3.tar.gz
 ```
 
 Then wire it up in your `build.zig`:
@@ -170,6 +170,31 @@ Fields with a Zig default value use that default when the key is absent. Fields 
 
 Returns `error.ParseFailed` for invalid TOML, `error.MissingField` for a required absent key, `error.TypeMismatch` for a wrong TOML type or out-of-range integer.
 
+#### `fromToml` custom hook
+
+Types can opt into custom mapping by declaring a method:
+
+```zig
+pub fn fromToml(v: toml.Value, allocator: Allocator) !MyType
+```
+
+When `parseInto` encounters a type with `fromToml`, it calls this method instead of the default comptime reflection. The hook fires for container types (struct, enum, union, opaque) and replaces the default mapping entirely:
+
+```zig
+const MyId = struct {
+    raw: []const u8,
+    pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !MyId {
+        return .{ .raw = try allocator.dupe(u8, v.string) };
+    }
+};
+const Config = struct { id: MyId };
+
+var cfg = try toml.parseInto(Config, arena.allocator(), "id = \"abc-123\"", null);
+// cfg.id.raw == "abc-123"
+```
+
+Use cases: wrapping strings into parsed types (IP addresses, URIs), validation at parse time (positive-only integers, port ranges), enum construction from custom rules.
+
 ### `parseSlice`
 
 ```zig
@@ -251,7 +276,7 @@ Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that 
 zig build test
 ```
 
-Runs 75 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
+Runs 82 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
 ## Build steps
 
@@ -264,18 +289,15 @@ Runs 75 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus
 
 ## Roadmap
 
-| Version | Feature | Notes |
-| ------- | ------- | ----- |
-| **v0.1.1** | `parseInto(T)` typed parser | Shipped |
-| **v0.1.2** | Code quality and refactoring | Shipped. File renames (`types.zig`→`value.zig`, `typed.zig`→`static.zig`), memory layering fix, `src/output/` namespace, bug fixes, 75 tests. No API changes. |
-| **v0.1.3** | `fromToml` custom hook | User types opt in by declaring `pub fn fromToml(v: toml.Value) !T`. Covers types that do not map directly (e.g. `std.net.Address`). |
-| **v0.1.4** | `toJson` output | Convert a parsed `Value` tree to JSON. No external dependency. |
-| **v0.2.0** | `writeToml` serializer | Write a `Value` tree or typed struct back to `.toml` text. First write-path capability. |
-| **v0.2.1** | Canonical formatter | Pretty-print a `Value` tree to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand. |
-| **v0.3.0** | Zero-copy strings | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep input alive. |
-| **v0.3.1** | `cloneValue` helper | Deep-copy a `Value` subtree into a fresh allocator. Companion to zero-copy. |
-| **v0.4.0** | In-place value rewriter | Modify specific TOML keys without re-serializing. Comments and formatting survive the edit. |
-| **v1.0.0** | `z-toml` CLI | Standalone binary with `to-json`, `fmt`, `lint`, and `rewrite` subcommands. Marks API stability commitment. |
+| Version    | Feature                 | Notes                                                                                                                                    |
+| ---------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **v0.1.4** | `toJson` output         | Convert a parsed `Value` tree to JSON. No external dependency.                                                                           |
+| **v0.2.0** | `writeToml` serializer  | Write a `Value` tree or typed struct back to `.toml` text. First write-path capability.                                                  |
+| **v0.2.1** | Canonical formatter     | Pretty-print a `Value` tree to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand.                |
+| **v0.3.0** | Zero-copy strings       | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep input alive. |
+| **v0.3.1** | `cloneValue` helper     | Deep-copy a `Value` subtree into a fresh allocator. Companion to zero-copy.                                                              |
+| **v0.4.0** | In-place value rewriter | Modify specific TOML keys without re-serializing. Comments and formatting survive the edit.                                              |
+| **v1.0.0** | `z-toml` CLI            | Standalone binary with `to-json`, `fmt`, `lint`, and `rewrite` subcommands. Marks API stability commitment.                              |
 
 ## References
 

@@ -271,35 +271,36 @@ const Parser = struct {
         try self.expect('"');
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.gpa);
-        try self.parseBasicStringContents(&buf, false);
+        try self.parseBasicStringContents(&buf);
         try self.expect('"');
         return buf.toOwnedSlice(self.gpa) catch error.OutOfMemory;
     }
 
-    fn parseMLBasicString(self: *Parser) ParseError!Value {
-        try self.expect('"');
-        try self.expect('"');
-        try self.expect('"');
+    fn parseMLString(self: *Parser, comptime basic: bool) ParseError!Value {
+        const delim: u8 = if (basic) '"' else '\'';
+        try self.expect(delim);
+        try self.expect(delim);
+        try self.expect(delim);
         _ = self.eat('\r');
         _ = self.eat('\n');
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.gpa);
         outer: while (true) {
-            const c = self.peek() orelse return self.fail("unterminated multi-line basic string", .{});
-            if (c == '"') {
+            const c = self.peek() orelse return self.fail("unterminated multi-line {s} string", .{if (basic) "basic" else "literal"});
+            if (c == delim) {
                 var q: usize = 0;
-                while (self.peek() == '"' and q < 5) {
+                while (self.peek() == delim and q < 5) {
                     self.advance();
                     q += 1;
                 }
                 if (q >= 3) {
-                    for (0..q - 3) |_| try buf.append(self.gpa, '"');
+                    for (0..q - 3) |_| try buf.append(self.gpa, delim);
                     break :outer;
                 }
-                for (0..q) |_| try buf.append(self.gpa, '"');
+                for (0..q) |_| try buf.append(self.gpa, delim);
                 continue;
             }
-            if (c == '\\') {
+            if (basic and c == '\\') {
                 self.advance();
                 try self.processEscape(&buf, true);
                 continue;
@@ -319,29 +320,20 @@ const Parser = struct {
         return .{ .string = try buf.toOwnedSlice(self.gpa) };
     }
 
-    fn parseBasicStringContents(self: *Parser, buf: *std.ArrayList(u8), multiline: bool) ParseError!void {
+    fn parseMLBasicString(self: *Parser) ParseError!Value { return self.parseMLString(true); }
+    fn parseMLLiteralString(self: *Parser) ParseError!Value { return self.parseMLString(false); }
+
+    fn parseBasicStringContents(self: *Parser, buf: *std.ArrayList(u8)) ParseError!void {
         while (true) {
             const c = self.peek() orelse return self.fail("unterminated string", .{});
             if (c == '"') return;
             if (c == '\\') {
                 self.advance();
-                try self.processEscape(buf, multiline);
+                try self.processEscape(buf, false);
                 continue;
             }
-            if (c == '\r') {
-                if (!multiline) return self.fail("newline in single-line string", .{});
-                self.advance();
-                if (self.peek() != '\n') return self.fail("bare CR not allowed", .{});
-                try buf.append(self.gpa, '\n');
-                self.advance();
-                continue;
-            }
-            if (c == '\n') {
-                if (!multiline) return self.fail("newline in single-line string", .{});
-                self.advance();
-                try buf.append(self.gpa, '\n');
-                continue;
-            }
+            if (c == '\r') return self.fail("newline in single-line string", .{});
+            if (c == '\n') return self.fail("newline in single-line string", .{});
             if (c != '\t' and (c < 0x20 or c == 0x7F))
                 return self.fail("control character U+{X:0>4} not allowed in string", .{c});
             self.advance();
@@ -458,44 +450,6 @@ const Parser = struct {
         const s = try self.gpa.dupe(u8, self.input[start..self.pos]);
         try self.expect('\'');
         return s;
-    }
-
-    fn parseMLLiteralString(self: *Parser) ParseError!Value {
-        try self.expect('\'');
-        try self.expect('\'');
-        try self.expect('\'');
-        _ = self.eat('\r');
-        _ = self.eat('\n');
-        var buf: std.ArrayList(u8) = .empty;
-        errdefer buf.deinit(self.gpa);
-        outer: while (true) {
-            const c = self.peek() orelse return self.fail("unterminated multi-line literal string", .{});
-            if (c == '\'') {
-                var q: usize = 0;
-                while (self.peek() == '\'' and q < 5) {
-                    self.advance();
-                    q += 1;
-                }
-                if (q >= 3) {
-                    for (0..q - 3) |_| try buf.append(self.gpa, '\'');
-                    break :outer;
-                }
-                for (0..q) |_| try buf.append(self.gpa, '\'');
-                continue;
-            }
-            if (c == '\r') {
-                self.advance();
-                if (self.peek() != '\n') return self.fail("bare CR not allowed", .{});
-                try buf.append(self.gpa, '\n');
-                self.advance();
-                continue;
-            }
-            if (c != '\t' and c != '\n' and (c < 0x20 or c == 0x7F))
-                return self.fail("control character U+{X:0>4} not allowed in multi-line literal string", .{c});
-            self.advance();
-            try buf.append(self.gpa, c);
-        }
-        return .{ .string = try buf.toOwnedSlice(self.gpa) };
     }
 
     // ─── value parsing ────────────────────────────────────────────────────────
@@ -964,12 +918,18 @@ const Parser = struct {
         self.cur = try self.navigateToAOT(self.root, key_parts.items);
     }
 
-    fn navigateToHeaderTable(self: *Parser, start_tbl: *Table, path: [][]u8) ParseError!*Table {
-        std.debug.assert(path.len > 0);
+    /// Navigate intermediate path segments (all but the last), creating implicit
+    /// tables as needed. Shared by `navigateToHeaderTable` and `navigateToAOT`
+    /// whose intermediate-segment logic is identical.
+    fn navigateIntermediate(
+        self: *Parser,
+        start_tbl: *Table,
+        start_meta: *TableMeta,
+        path: [][]u8,
+    ) ParseError!struct { tbl: *Table, meta: *TableMeta } {
         const ma = self.meta_arena.allocator();
         var tbl = start_tbl;
-        var meta = self.getMeta(tbl);
-
+        var meta = start_meta;
         for (path[0 .. path.len - 1]) |part| {
             const gop = tbl.getOrPut(self.gpa, part) catch return error.OutOfMemory;
             if (!gop.found_existing) {
@@ -1000,6 +960,16 @@ const Parser = struct {
                 }
             }
         }
+        return .{ .tbl = tbl, .meta = meta };
+    }
+
+    fn navigateToHeaderTable(self: *Parser, start_tbl: *Table, path: [][]u8) ParseError!*Table {
+        std.debug.assert(path.len > 0);
+        const ma = self.meta_arena.allocator();
+
+        const intermediates = try self.navigateIntermediate(start_tbl, self.getMeta(start_tbl), path);
+        var tbl = intermediates.tbl;
+        var meta = intermediates.meta;
 
         const last = path[path.len - 1];
         const gop = tbl.getOrPut(self.gpa, last) catch return error.OutOfMemory;
@@ -1034,39 +1004,10 @@ const Parser = struct {
     fn navigateToAOT(self: *Parser, start_tbl: *Table, path: [][]u8) ParseError!*Table {
         std.debug.assert(path.len > 0);
         const ma = self.meta_arena.allocator();
-        var tbl = start_tbl;
-        var meta = self.getMeta(tbl);
 
-        for (path[0 .. path.len - 1]) |part| {
-            const gop = tbl.getOrPut(self.gpa, part) catch return error.OutOfMemory;
-            if (!gop.found_existing) {
-                gop.value_ptr.* = .{ .boolean = false };
-                gop.key_ptr.* = &.{};
-                const sub = try self.gpa.create(Table);
-                sub.* = .empty;
-                gop.value_ptr.* = .{ .table = sub };
-                _ = try self.createMeta(sub, .implicit);
-                const key_copy = try self.gpa.dupe(u8, part);
-                gop.key_ptr.* = key_copy;
-                try meta.key_kinds.put(ma, gop.key_ptr.*, .implicit_table);
-                tbl = sub;
-                meta = self.getMeta(tbl);
-            } else {
-                const kk = meta.key_kinds.get(gop.key_ptr.*) orelse .value;
-                switch (kk) {
-                    .value, .inline_table => return self.fail("cannot use '{s}' as a table", .{part}),
-                    .aot_array => {
-                        const arr = gop.value_ptr.*.array;
-                        tbl = arr.items[arr.items.len - 1].table;
-                        meta = self.getMeta(tbl);
-                    },
-                    .implicit_table, .dotted_table, .header_table => {
-                        tbl = gop.value_ptr.*.table;
-                        meta = self.getMeta(tbl);
-                    },
-                }
-            }
-        }
+        const intermediates = try self.navigateIntermediate(start_tbl, self.getMeta(start_tbl), path);
+        var tbl = intermediates.tbl;
+        var meta = intermediates.meta;
 
         const last = path[path.len - 1];
         const gop = tbl.getOrPut(self.gpa, last) catch return error.OutOfMemory;
@@ -1164,6 +1105,9 @@ fn daysInMonth(year: u32, month: u32) u32 {
     };
 }
 
+/// Parse `input` as TOML v1.1.0. Returns a heap-allocated root `*Table`
+/// on success. The caller owns all memory — free via `deinitTable(root, gpa)` + `gpa.destroy(root)`.
+/// On failure `err_info` (if non-null) is populated with line/col/message.
 pub fn parseSlice(gpa: Allocator, input: []const u8, err_info: ?*ErrorInfo) ParseError!*Table {
     var parser = try Parser.init(gpa, input);
     defer parser.deinit();

@@ -1,3 +1,6 @@
+//! Feature tests for the z-toml parser. Covers dynamic `parseSlice` API,
+//! typed `parseInto` API, error paths, edge cases, and the `fromToml` hook.
+
 const std = @import("std");
 const toml = @import("toml");
 
@@ -710,4 +713,125 @@ test "\\e escape produces ESC byte" {
     const root = try toml.parseSlice(gpa, src, null);
     defer toml.deinit(root, gpa);
     try std.testing.expectEqualStrings("\x1B[31m", root.get("s").?.string);
+}
+
+// ─── fromToml custom hook tests ────────────────────────────────────────────────
+
+test "fromToml: happy path wraps string into custom type" {
+    const MyId = struct {
+        raw: []const u8,
+        pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
+            const s = v.string;
+            return @This(){ .raw = try allocator.dupe(u8, s) };
+        }
+    };
+    const Config = struct { id: MyId };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "id = \"abc-123\"", null);
+    try std.testing.expectEqualStrings("abc-123", cfg.id.raw);
+}
+
+test "fromToml: error returned from hook maps to TypeMismatch" {
+    const NeverPositive = struct {
+        x: i64,
+        pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            if (v.integer <= 0) return error.NegativeValue;
+            return @This(){ .x = v.integer };
+        }
+    };
+    const Config = struct { val: NeverPositive };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expectError(
+        error.TypeMismatch,
+        toml.parseInto(Config, arena.allocator(), "val = -1", null),
+    );
+}
+
+test "fromToml: type without fromToml still maps normally" {
+    const Config = struct { name: []const u8, count: i64 };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "name = \"zig\"\ncount = 42", null);
+    try std.testing.expectEqualStrings("zig", cfg.name);
+    try std.testing.expectEqual(@as(i64, 42), cfg.count);
+}
+
+test "fromToml: allocator passthrough returns owned []u8" {
+    const OwnedStr = struct {
+        buf: []u8,
+        pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
+            const duped = try allocator.dupe(u8, v.string);
+            return @This(){ .buf = duped };
+        }
+    };
+    const Config = struct { label: OwnedStr };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "label = \"hello\"", null);
+    try std.testing.expectEqualStrings("hello", cfg.label.buf);
+}
+
+test "fromToml: optional ?MyFromTomlType field" {
+    const MyId = struct {
+        raw: []const u8,
+        pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
+            return @This(){ .raw = try allocator.dupe(u8, v.string) };
+        }
+    };
+    const Config = struct { id: ?MyId };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Present
+    const cfg = try toml.parseInto(Config, arena.allocator(), "id = \"abc\"", null);
+    try std.testing.expect(cfg.id != null);
+    try std.testing.expectEqualStrings("abc", cfg.id.?.raw);
+
+    // Absent
+    const cfg2 = try toml.parseInto(Config, arena.allocator(), "", null);
+    try std.testing.expect(cfg2.id == null);
+}
+
+test "fromToml: slice []MyFromTomlType" {
+    const Wrapper = struct {
+        inner: i64,
+        pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
+            _ = allocator;
+            return @This(){ .inner = v.integer };
+        }
+    };
+    const Config = struct { nums: []Wrapper };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(Config, arena.allocator(), "nums = [10, 20, 30]", null);
+    try std.testing.expectEqual(@as(usize, 3), cfg.nums.len);
+    try std.testing.expectEqual(@as(i64, 10), cfg.nums[0].inner);
+    try std.testing.expectEqual(@as(i64, 30), cfg.nums[2].inner);
+}
+
+test "fromToml: hook on root struct fires instead of mapTable" {
+    // RootCustom has fromToml, so parseInto calls it instead of field-by-field
+    // mapping. The hook receives the root *Table as a Value and can extract
+    // fields manually.
+    const RootCustom = struct {
+        title: []const u8,
+        pub fn fromToml(v: toml.Value, allocator: std.mem.Allocator) !@This() {
+            const tbl = v.table;
+            const t = tbl.get("my_title").?.string;
+            return @This(){ .title = try allocator.dupe(u8, t) };
+        }
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cfg = try toml.parseInto(RootCustom, arena.allocator(), "my_title = \"custom mapping\"", null);
+    try std.testing.expectEqualStrings("custom mapping", cfg.title);
 }

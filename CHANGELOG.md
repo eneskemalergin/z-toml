@@ -5,6 +5,19 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
+## [0.1.3] - 2026-05-11
+
+### Added
+
+- `fromToml` custom hook for `parseInto`. Types declaring `pub fn fromToml(v: toml.Value, allocator: Allocator) !T` get called instead of the default comptime reflection mapping. The hook fires before any built-in type logic, giving user-defined types full control over construction from a TOML value. User errors become `TypeMismatch`.
+- 7 `fromToml` unit tests: happy path, error contract, regression (no hook), allocator passthrough, optional unwrapping, slice of custom types, root struct with hook.
+
+### Changed
+
+- `build.zig.zon` version bumped to `0.1.3`.
+
+---
+
 ## [0.1.2] - 2026-05-02
 
 ### Added

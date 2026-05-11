@@ -51,6 +51,11 @@ fn mapTable(comptime T: type, table: *Table, gpa: Allocator) ParseIntoError!T {
         @compileError("parseInto: T must be a struct, got " ++ @typeName(T));
     }
 
+    if (comptime isContainer(T)) if (@hasDecl(T, "fromToml"))
+        return T.fromToml(.{ .table = table }, gpa) catch |err| switch (err) {
+            else => error.TypeMismatch,
+        };
+
     var result: T = undefined;
 
     inline for (@typeInfo(T).@"struct".fields) |field| {
@@ -69,6 +74,11 @@ fn mapTable(comptime T: type, table: *Table, gpa: Allocator) ParseIntoError!T {
 }
 
 fn mapValue(comptime T: type, value: Value, gpa: Allocator) ParseIntoError!T {
+    if (comptime isContainer(T)) if (@hasDecl(T, "fromToml"))
+        return T.fromToml(value, gpa) catch |err| switch (err) {
+            else => error.TypeMismatch,
+        };
+
     // Datetime structs are matched by type identity before the generic struct branch.
     if (T == types.OffsetDateTime) {
         return if (value == .offset_datetime) value.offset_datetime else error.TypeMismatch;
@@ -131,4 +141,11 @@ fn mapValue(comptime T: type, value: Value, gpa: Allocator) ParseIntoError!T {
         },
         else => @compileError("parseInto: unsupported type " ++ @typeName(T)),
     }
+}
+
+fn isContainer(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .@"struct", .@"enum", .@"union", .@"opaque" => true,
+        else => false,
+    };
 }
