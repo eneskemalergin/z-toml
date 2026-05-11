@@ -1,6 +1,6 @@
 .{
     .name = .z_toml,
-    .version = "0.1.4",
+    .version = "0.2.0",
     // Uniquely identifies this package. Never change after first publish.
     .fingerprint = 0x92b95451f327aa40,
     .minimum_zig_version = "0.16.0",

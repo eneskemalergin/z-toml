@@ -5,6 +5,23 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
+## [0.2.0] - 2026-05-11
+
+### Added
+
+- `toml.writeToml(value, writer)`: serialize a parsed `Value` tree back to `.toml` text. Uses `[header]` syntax for sub-tables and `[[...]]` for arrays of tables. All output is valid TOML v1.1.0.
+- `toml.writeTomlOpts(value, writer, opts, allocator)`: writeToml with `WriteOptions` for canonical output.
+- `toml.WriteOptions`: struct with `sort_keys: bool` — when true, keys are sorted alphabetically within each table for deterministic canonical output.
+- 15 `writeToml` round-trip tests: simple scalars, special floats, arrays, inline tables, dotted keys, AOTs, nested AOTs with sub-tables/sub-AOTs, datetime variants, empty document, quoted keys, mixed root/dotted tables, spec-example-1, proteomics (678-line real-world file).
+- 6 canonical formatter tests: insertion order preserved, sort_keys alphabetical, deterministic output, round-trip with sort_keys, nested table sorting, default opts matches writeToml.
+- Test suite is now 127 tests.
+
+### Changed
+
+- `build.zig.zon` version bumped to `0.2.0`.
+
+---
+
 ## [0.1.4] - 2026-05-11
 
 ### Added
@@ -32,7 +49,7 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
-## [0.1.2] - 2026-05-02
+## [0.1.2] - 2026-05-02 - [Tagged]
 
 ### Added
 
@@ -69,7 +86,7 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
-## [0.1.0] - 2026-05-02
+## [0.1.0] - 2026-05-02 - [Tagged]
 
 First public release.
 

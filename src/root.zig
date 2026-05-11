@@ -10,6 +10,7 @@ const types = @import("value.zig");
 const parser_mod = @import("parser.zig");
 const typed_mod = @import("static.zig");
 const json_output = @import("output/json.zig");
+const output_toml = @import("output/toml.zig");
 
 // ─── Re-export public types ───────────────────────────────────────────────────
 
@@ -69,3 +70,16 @@ pub fn parseInto(
 /// NaN/Inf floats become JSON `null`. Datetimes are ISO 8601 strings.
 /// Table key order matches TOML insertion order.
 pub const toJson = json_output.toJson;
+
+/// Serialize a parsed `Value` tree as TOML text to `w`.
+///
+/// Nested tables use dotted keys or inline tables; arrays of tables
+/// use `[[...]]` headers. Output is always valid TOML v1.1.0.
+pub const writeToml = output_toml.writeToml;
+
+/// Serialize `value` with formatting options.
+///
+/// `opts.sort_keys` sorts keys alphabetically for canonical output.
+/// `gpa` is used for key-sort allocation.
+pub const writeTomlOpts = output_toml.writeTomlOpts;
+pub const WriteOptions = output_toml.WriteOptions;

@@ -13,6 +13,7 @@
   <a href="https://github.com/eneskemalergin/z-toml/actions/workflows/ci.yml">
     <img src="https://github.com/eneskemalergin/z-toml/actions/workflows/ci.yml/badge.svg?style=flat-square" alt="CI">
   </a>
+  <img src="https://img.shields.io/badge/version-v0.2.0-2C8EBB?style=flat-square" alt="v0.2.0">
   <img src="https://img.shields.io/badge/zig-0.16.0-F7A41D?style=flat-square&logo=zig&logoColor=white" alt="Zig 0.16.0">
   <img src="https://img.shields.io/badge/TOML-v1.1.0-9C4221?style=flat-square" alt="TOML v1.1.0">
   <img src="https://img.shields.io/badge/license-MIT-4B9D6E?style=flat-square" alt="MIT">
@@ -25,6 +26,7 @@
 - `parseInto(T)`: map TOML directly onto a Zig struct with comptime reflection. No manual tree walking.
 - `parseSlice`: dynamic tree API for unknown-shape documents
 - `toJson`: serialize a parsed tree to JSON
+- `writeToml` / `writeTomlOpts`: serialize back to TOML text
 - Validated against the [toml-lang/toml-test](https://github.com/toml-lang/toml-test) corpus (215 valid + 467 invalid files)
 - Clear error messages with line and column numbers
 - No dependencies beyond the Zig standard library
@@ -40,7 +42,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .z_toml = .{
-        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.4.tar.gz",
+        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.2.0.tar.gz",
         .hash = "<run zig fetch to get the hash>",
     },
 },
@@ -49,7 +51,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 Or use `zig fetch` to add it automatically:
 
 ```sh
-zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.1.4.tar.gz
+zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.2.0.tar.gz
 ```
 
 Then wire it up in your `build.zig`:
@@ -231,6 +233,50 @@ try toml.toJson(root_value, &w);
 std.debug.print("{s}\n", .{w.buffered()});
 ```
 
+### `writeToml`
+
+```zig
+pub fn writeToml(value: Value, w: *std.Io.Writer) std.Io.Writer.Error!void
+```
+
+Serializes a parsed `Value` tree back to TOML text. Uses `[header]` syntax for sub-tables and `[[...]]` for arrays of tables. All output is valid TOML v1.1.0.
+
+```zig
+var buf: [4096]u8 = undefined;
+var w = std.Io.Writer.fixed(&buf);
+try toml.writeToml(.{ .table = root }, &w);
+std.debug.print("{s}\n", .{w.buffered()});
+```
+
+### `writeTomlOpts`
+
+```zig
+pub fn writeTomlOpts(
+    value: Value,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void
+```
+
+Same as `writeToml` but with `WriteOptions` for canonical output. Set `opts.sort_keys = true` to sort keys alphabetically within each table.
+
+```zig
+var buf: [4096]u8 = undefined;
+var w = std.Io.Writer.fixed(&buf);
+try toml.writeTomlOpts(.{ .table = root }, &w, .{ .sort_keys = true }, gpa);
+```
+
+### `WriteOptions`
+
+```zig
+pub const WriteOptions = struct {
+    sort_keys: bool = false,
+    prefer_headers: bool = false,
+    use_escape_e: bool = false,
+};
+```
+
 ### `ErrorInfo`
 
 ```zig
@@ -292,7 +338,7 @@ Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that 
 zig build test
 ```
 
-Runs 100 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
+Runs 127 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
 ## Build steps
 
@@ -307,8 +353,6 @@ Runs 100 tests: unit tests for both APIs plus the full toml-lang/toml-test corpu
 
 | Version    | Feature                 | Notes                                                                                                                                    |
 | ---------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **v0.2.0** | `writeToml` serializer  | Write a `Value` tree or typed struct back to `.toml` text. First write-path capability.                                                  |
-| **v0.2.1** | Canonical formatter     | Pretty-print a `Value` tree to normalized TOML (stable key order, consistent spacing). Foundation for a `fmt` subcommand.                |
 | **v0.3.0** | Zero-copy strings       | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep input alive. |
 | **v0.3.1** | `cloneValue` helper     | Deep-copy a `Value` subtree into a fresh allocator. Companion to zero-copy.                                                              |
 | **v0.4.0** | In-place value rewriter | Modify specific TOML keys without re-serializing. Comments and formatting survive the edit.                                              |
