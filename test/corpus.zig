@@ -5,6 +5,8 @@
 const std = @import("std");
 const toml = @import("toml");
 const json = std.json;
+const temporal = toml.temporal;
+const support = @import("support.zig");
 
 const manifest = @embedFile("files-toml-1.1.0");
 const max_reported_failures = 20;
@@ -13,10 +15,6 @@ const TypedScalar = struct {
     type_name: []const u8,
     value: []const u8,
 };
-
-fn readTestFile(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
-    return std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, gpa, .limited(std.math.maxInt(usize)));
-}
 
 fn makeChildPath(buf: []u8, base: []const u8, child: []const u8) []const u8 {
     if (base.len == 0) {
@@ -41,16 +39,6 @@ fn typedScalar(expected: json.Value) ?TypedScalar {
     return .{ .type_name = type_value.string, .value = value_value.string };
 }
 
-fn appendFraction(buf: []u8, nanosecond: u32) []const u8 {
-    if (nanosecond == 0) return "";
-
-    var digits_buf: [9]u8 = undefined;
-    _ = std.fmt.bufPrint(&digits_buf, "{d:0>9}", .{nanosecond}) catch return "";
-    var end = digits_buf.len;
-    while (end > 0 and digits_buf[end - 1] == '0') : (end -= 1) {}
-    return std.fmt.bufPrint(buf, ".{s}", .{digits_buf[0..end]}) catch "";
-}
-
 fn normalizeTemporalValue(buf: []u8, value: []const u8) []const u8 {
     const dot_index = std.mem.indexOfScalar(u8, value, '.') orelse return value;
 
@@ -63,43 +51,6 @@ fn normalizeTemporalValue(buf: []u8, value: []const u8) []const u8 {
     if (trimmed_end == end) return value;
 
     return std.fmt.bufPrint(buf, "{s}{s}", .{ value[0..trimmed_end], value[end..] }) catch value;
-}
-
-fn formatLocalDate(buf: []u8, value: toml.LocalDate) []const u8 {
-    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}", .{ value.year, value.month, value.day }) catch "";
-}
-
-fn formatLocalTime(buf: []u8, value: toml.LocalTime) []const u8 {
-    var fraction_buf: [16]u8 = undefined;
-    const fraction = appendFraction(&fraction_buf, value.nanosecond);
-    return std.fmt.bufPrint(
-        buf,
-        "{d:0>2}:{d:0>2}:{d:0>2}{s}",
-        .{ value.hour, value.minute, value.second, fraction },
-    ) catch "";
-}
-
-fn formatLocalDateTime(buf: []u8, value: toml.LocalDateTime) []const u8 {
-    var date_buf: [16]u8 = undefined;
-    var time_buf: [24]u8 = undefined;
-    return std.fmt.bufPrint(buf, "{s}T{s}", .{
-        formatLocalDate(&date_buf, value.date),
-        formatLocalTime(&time_buf, value.time),
-    }) catch "";
-}
-
-fn formatOffsetDateTime(buf: []u8, value: toml.OffsetDateTime) []const u8 {
-    var local_buf: [48]u8 = undefined;
-    const local = formatLocalDateTime(&local_buf, .{ .date = value.date, .time = value.time });
-    if (value.offset_minutes == 0) {
-        return std.fmt.bufPrint(buf, "{s}Z", .{local}) catch "";
-    }
-
-    const total_minutes = @abs(value.offset_minutes);
-    const offset_hours = @divTrunc(total_minutes, 60);
-    const offset_minutes = @mod(total_minutes, 60);
-    const sign: u8 = if (value.offset_minutes < 0) '-' else '+';
-    return std.fmt.bufPrint(buf, "{s}{c}{d:0>2}:{d:0>2}", .{ local, sign, offset_hours, offset_minutes }) catch "";
 }
 
 fn compareScalar(actual: toml.Value, expected: TypedScalar, path: []const u8) CompareError!void {
@@ -174,7 +125,7 @@ fn compareScalar(actual: toml.Value, expected: TypedScalar, path: []const u8) Co
     if (std.mem.eql(u8, expected.type_name, "datetime")) {
         var actual_buf: [64]u8 = undefined;
         var expected_buf: [64]u8 = undefined;
-        if (actual != .offset_datetime or !std.mem.eql(u8, formatOffsetDateTime(&actual_buf, actual.offset_datetime), normalizeTemporalValue(&expected_buf, expected.value))) {
+        if (actual != .offset_datetime or !std.mem.eql(u8, temporal.formatOffsetDateTime(&actual_buf, actual.offset_datetime), normalizeTemporalValue(&expected_buf, expected.value))) {
             std.debug.print("\nvalid corpus mismatch: {s} expected datetime {s}\n", .{ path, expected.value });
             return error.Mismatch;
         }
@@ -184,7 +135,7 @@ fn compareScalar(actual: toml.Value, expected: TypedScalar, path: []const u8) Co
     if (std.mem.eql(u8, expected.type_name, "datetime-local")) {
         var actual_buf: [64]u8 = undefined;
         var expected_buf: [64]u8 = undefined;
-        if (actual != .local_datetime or !std.mem.eql(u8, formatLocalDateTime(&actual_buf, actual.local_datetime), normalizeTemporalValue(&expected_buf, expected.value))) {
+        if (actual != .local_datetime or !std.mem.eql(u8, temporal.formatLocalDateTime(&actual_buf, actual.local_datetime), normalizeTemporalValue(&expected_buf, expected.value))) {
             std.debug.print("\nvalid corpus mismatch: {s} expected local datetime {s}\n", .{ path, expected.value });
             return error.Mismatch;
         }
@@ -193,7 +144,7 @@ fn compareScalar(actual: toml.Value, expected: TypedScalar, path: []const u8) Co
 
     if (std.mem.eql(u8, expected.type_name, "date-local")) {
         var buf: [16]u8 = undefined;
-        if (actual != .local_date or !std.mem.eql(u8, formatLocalDate(&buf, actual.local_date), expected.value)) {
+        if (actual != .local_date or !std.mem.eql(u8, temporal.formatLocalDate(&buf, actual.local_date), expected.value)) {
             std.debug.print("\nvalid corpus mismatch: {s} expected local date {s}\n", .{ path, expected.value });
             return error.Mismatch;
         }
@@ -203,7 +154,7 @@ fn compareScalar(actual: toml.Value, expected: TypedScalar, path: []const u8) Co
     if (std.mem.eql(u8, expected.type_name, "time-local")) {
         var actual_buf: [24]u8 = undefined;
         var expected_buf: [24]u8 = undefined;
-        if (actual != .local_time or !std.mem.eql(u8, formatLocalTime(&actual_buf, actual.local_time), normalizeTemporalValue(&expected_buf, expected.value))) {
+        if (actual != .local_time or !std.mem.eql(u8, temporal.formatLocalTime(&actual_buf, actual.local_time), normalizeTemporalValue(&expected_buf, expected.value))) {
             std.debug.print("\nvalid corpus mismatch: {s} expected local time {s}\n", .{ path, expected.value });
             return error.Mismatch;
         }
@@ -287,7 +238,7 @@ fn runValidCorpus() !void {
         const path = try std.fs.path.join(gpa, &.{ "test", entry });
         defer gpa.free(path);
 
-        const src = try readTestFile(gpa, path);
+        const src = try support.readTestFile(gpa, path);
         defer gpa.free(src);
 
         var err: toml.ErrorInfo = .{};
@@ -304,7 +255,7 @@ fn runValidCorpus() !void {
         const json_path = try std.fmt.allocPrint(gpa, "test/{s}.json", .{entry[0 .. entry.len - ".toml".len]});
         defer gpa.free(json_path);
 
-        const json_src = readTestFile(gpa, json_path) catch |e| {
+        const json_src = support.readTestFile(gpa, json_path) catch |e| {
             if (e == error.OutOfMemory) return e;
             failures += 1;
             if (failures <= max_reported_failures) {
@@ -352,7 +303,7 @@ fn runInvalidCorpus() !void {
         const path = try std.fs.path.join(gpa, &.{ "test", entry });
         defer gpa.free(path);
 
-        const src = try readTestFile(gpa, path);
+        const src = try support.readTestFile(gpa, path);
         defer gpa.free(src);
 
         var err: toml.ErrorInfo = .{};
@@ -417,7 +368,7 @@ fn runParseIntoValidSweep() !void {
         const path = try std.fs.path.join(gpa, &.{ "test", entry });
         defer gpa.free(path);
 
-        const src = try readTestFile(gpa, path);
+        const src = try support.readTestFile(gpa, path);
         defer gpa.free(src);
 
         var err: toml.ErrorInfo = .{};
@@ -462,7 +413,7 @@ fn runParseIntoInvalidSweep() !void {
         const path = try std.fs.path.join(gpa, &.{ "test", entry });
         defer gpa.free(path);
 
-        const src = try readTestFile(gpa, path);
+        const src = try support.readTestFile(gpa, path);
         defer gpa.free(src);
 
         var err: toml.ErrorInfo = .{};
@@ -537,7 +488,7 @@ test "parseInto corpus fixture: spec-example-1 fields are correct" {
     };
 
     const gpa = std.testing.allocator;
-    const src = try readTestFile(gpa, "test/valid/spec-example-1.toml");
+    const src = try support.readTestFile(gpa, "test/valid/spec-example-1.toml");
     defer gpa.free(src);
 
     var arena = std.heap.ArenaAllocator.init(gpa);

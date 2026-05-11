@@ -1,7 +1,7 @@
 //! TOML v1.1.0 value types.
 //!
 //! This file contains only type definitions. Memory management functions
-//! (`deinitTable`, `Value.deinit`) live in `parser.zig` alongside the code
+//! (`deinitTable`, `deinitValue`) live in `parser.zig` alongside the code
 //! that allocates these values.
 const std = @import("std");
 

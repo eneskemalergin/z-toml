@@ -9,6 +9,7 @@ const std = @import("std");
 const types = @import("value.zig");
 const parser_mod = @import("parser.zig");
 const typed_mod = @import("static.zig");
+pub const temporal = @import("temporal.zig");
 const json_output = @import("output/json.zig");
 const output_toml = @import("output/toml.zig");
 
@@ -17,6 +18,8 @@ const output_toml = @import("output/toml.zig");
 pub const Value = types.Value;
 pub const Table = types.Table;
 pub const Array = types.Array;
+pub const Base = types.Base;
+pub const IntValue = types.IntValue;
 pub const LocalDate = types.LocalDate;
 pub const LocalTime = types.LocalTime;
 pub const LocalDateTime = types.LocalDateTime;

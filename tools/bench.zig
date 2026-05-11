@@ -9,23 +9,21 @@ const files = [_]File{
     .{ .path = "test/valid/spec-example-1.toml", .label = "spec-example-1" },
 };
 
-fn getUs(_: std.Io) u64 {
-    var ts: std.os.linux.timespec = undefined;
-    _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
-    return @as(u64, @intCast(ts.sec)) * 1_000_000 + @as(u64, @intCast(ts.nsec)) / 1000;
+fn getUs(io: std.Io) u64 {
+    return @intCast(std.Io.Timestamp.now(io, .awake).toMicroseconds());
 }
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const gpa = arena.allocator();
-
     var threaded = std.Io.Threaded.init_single_threaded;
     const io = threaded.io();
 
     std.debug.print("{s:>25}  {s:>6}  {s:>7}  {s:>7}  {s:>7}  {s:>7}\n", .{ "file", "bytes", "parse", "write", "json", "rt" });
 
     inline for (files) |f| {
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+        const gpa = arena.allocator();
+
         const src = try std.Io.Dir.cwd().readFileAlloc(io, f.path, gpa, .limited(1 << 22));
         const src_len = src.len;
 

@@ -9,21 +9,17 @@
 const std = @import("std");
 const toml = @import("toml");
 
-fn walk(tree: *const toml.Table) void {
+fn walkValue(value: toml.Value) void {
+    switch (value) {
+        .table => |t| walkTable(t),
+        .array => |a| for (a.items) |item| walkValue(item),
+        else => {},
+    }
+}
+
+fn walkTable(tree: *const toml.Table) void {
     for (tree.keys(), tree.values()) |_, val| {
-        switch (val) {
-            .table => |t| walk(t),
-            .array => |a| for (a.items) |item| {
-                switch (item) {
-                    .table => |t| walk(t),
-                    .array => |aa| for (aa.items) |ii| {
-                        if (ii == .table) walk(ii.table);
-                    },
-                    else => {},
-                }
-            },
-            else => {},
-        }
+        walkValue(val);
     }
 }
 
@@ -58,7 +54,7 @@ test "fuzz: random byte sequences never crash" {
         }
 
         if (toml.parseSlice(alloc, buf, null)) |root| {
-            walk(root);
+            walkTable(root);
         } else |err| switch (err) {
             error.ParseFailed => {},
             error.OutOfMemory => {},

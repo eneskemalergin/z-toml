@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const types = @import("../value.zig");
+const temporal = @import("../temporal.zig");
 
 const Value = types.Value;
 
@@ -21,28 +22,6 @@ fn writeJsonString(w: *std.Io.Writer, s: []const u8) std.Io.Writer.Error!void {
         },
         else => try w.writeByte(c),
     };
-}
-
-fn writeOffset(w: *std.Io.Writer, offset_minutes: i16) std.Io.Writer.Error!void {
-    if (offset_minutes == 0) return w.writeByte('Z');
-    const abs = if (offset_minutes < 0) @as(u16, @intCast(-offset_minutes)) else @as(u16, @intCast(offset_minutes));
-    const sign: u8 = if (offset_minutes < 0) '-' else '+';
-    try w.print("{c}{d:0>2}:{d:0>2}", .{ sign, abs / 60, abs % 60 });
-}
-
-fn writeLocalDate(w: *std.Io.Writer, d: types.LocalDate) std.Io.Writer.Error!void {
-    try w.print("{d:0>4}-{d:0>2}-{d:0>2}", .{ d.year, d.month, d.day });
-}
-
-fn writeLocalTime(w: *std.Io.Writer, t: types.LocalTime) std.Io.Writer.Error!void {
-    try w.print("{d:0>2}:{d:0>2}:{d:0>2}", .{ t.hour, t.minute, t.second });
-    if (t.nanosecond != 0) {
-        var digits_buf: [9]u8 = undefined;
-        const digits = std.fmt.bufPrint(&digits_buf, "{d:0>9}", .{t.nanosecond}) catch "";
-        var end = digits.len;
-        while (end > 0 and digits[end - 1] == '0') end -= 1;
-        try w.print(".{s}", .{digits[0..end]});
-    }
 }
 
 /// Serialize `value` as JSON to `w`.
@@ -67,27 +46,27 @@ pub fn toJson(value: Value, w: *std.Io.Writer) std.Io.Writer.Error!void {
         .boolean => |b| try w.writeAll(if (b) "true" else "false"),
         .offset_datetime => |dt| {
             try w.writeByte('"');
-            try writeLocalDate(w, dt.date);
+            try temporal.writeLocalDate(w, dt.date);
             try w.writeByte('T');
-            try writeLocalTime(w, dt.time);
-            try writeOffset(w, dt.offset_minutes);
+            try temporal.writeLocalTime(w, dt.time);
+            try temporal.writeOffset(w, dt.offset_minutes);
             try w.writeByte('"');
         },
         .local_datetime => |dt| {
             try w.writeByte('"');
-            try writeLocalDate(w, dt.date);
+            try temporal.writeLocalDate(w, dt.date);
             try w.writeByte('T');
-            try writeLocalTime(w, dt.time);
+            try temporal.writeLocalTime(w, dt.time);
             try w.writeByte('"');
         },
         .local_date => |d| {
             try w.writeByte('"');
-            try writeLocalDate(w, d);
+            try temporal.writeLocalDate(w, d);
             try w.writeByte('"');
         },
         .local_time => |t| {
             try w.writeByte('"');
-            try writeLocalTime(w, t);
+            try temporal.writeLocalTime(w, t);
             try w.writeByte('"');
         },
         .array => |arr| {

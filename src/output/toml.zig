@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const types = @import("../value.zig");
+const temporal = @import("../temporal.zig");
 
 const Value = types.Value;
 const Table = types.Table;
@@ -99,28 +100,6 @@ fn writeBasicString(w: *std.Io.Writer, s: []const u8, opts: WriteOptions) std.Io
     try w.writeByte('"');
 }
 
-fn writeOffset(w: *std.Io.Writer, offset_minutes: i16) std.Io.Writer.Error!void {
-    if (offset_minutes == 0) return w.writeByte('Z');
-    const abs = if (offset_minutes < 0) @as(u16, @intCast(-offset_minutes)) else @as(u16, @intCast(offset_minutes));
-    const sign: u8 = if (offset_minutes < 0) '-' else '+';
-    try w.print("{c}{d:0>2}:{d:0>2}", .{ sign, abs / 60, abs % 60 });
-}
-
-fn writeLocalDate(w: *std.Io.Writer, d: types.LocalDate) std.Io.Writer.Error!void {
-    try w.print("{d:0>4}-{d:0>2}-{d:0>2}", .{ d.year, d.month, d.day });
-}
-
-fn writeLocalTime(w: *std.Io.Writer, t: types.LocalTime) std.Io.Writer.Error!void {
-    try w.print("{d:0>2}:{d:0>2}:{d:0>2}", .{ t.hour, t.minute, t.second });
-    if (t.nanosecond != 0) {
-        var digits_buf: [9]u8 = undefined;
-        const digits = std.fmt.bufPrint(&digits_buf, "{d:0>9}", .{t.nanosecond}) catch return;
-        var end = digits.len;
-        while (end > 0 and digits[end - 1] == '0') end -= 1;
-        try w.print(".{s}", .{digits[0..end]});
-    }
-}
-
 fn writeValue(w: *std.Io.Writer, val: Value, opts: WriteOptions) std.Io.Writer.Error!void {
     switch (val) {
         .string => |s| try writeBasicString(w, s, opts),
@@ -149,18 +128,18 @@ fn writeValue(w: *std.Io.Writer, val: Value, opts: WriteOptions) std.Io.Writer.E
         },
         .boolean => |b| try w.writeAll(if (b) "true" else "false"),
         .offset_datetime => |dt| {
-            try writeLocalDate(w, dt.date);
+            try temporal.writeLocalDate(w, dt.date);
             try w.writeByte('T');
-            try writeLocalTime(w, dt.time);
-            try writeOffset(w, dt.offset_minutes);
+            try temporal.writeLocalTime(w, dt.time);
+            try temporal.writeOffset(w, dt.offset_minutes);
         },
         .local_datetime => |dt| {
-            try writeLocalDate(w, dt.date);
+            try temporal.writeLocalDate(w, dt.date);
             try w.writeByte('T');
-            try writeLocalTime(w, dt.time);
+            try temporal.writeLocalTime(w, dt.time);
         },
-        .local_date => |d| try writeLocalDate(w, d),
-        .local_time => |t| try writeLocalTime(w, t),
+        .local_date => |d| try temporal.writeLocalDate(w, d),
+        .local_time => |t| try temporal.writeLocalTime(w, t),
         .array => |arr| {
             try w.writeByte('[');
             for (arr.items, 0..) |item, i| {
@@ -242,8 +221,7 @@ fn kvsOf(tbl: *Table, opts: WriteOptions, gpa: Allocator) Allocator.Error![]KeyV
     while (it.next()) |entry| {
         const val = entry.value_ptr.*;
         const kind: EntryKind = switch (val) {
-            .string, .integer, .float, .boolean,
-            .offset_datetime, .local_datetime, .local_date, .local_time => .plain,
+            .string, .integer, .float, .boolean, .offset_datetime, .local_datetime, .local_date, .local_time => .plain,
             .array => if (isArrayOfTables(val)) .aot else .plain,
             .table => |tbl2| if (!opts.prefer_headers and isInlineTable(tbl2)) .inline_table else .table,
         };

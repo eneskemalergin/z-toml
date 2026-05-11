@@ -1,6 +1,7 @@
 const std = @import("std");
 const toml = @import("toml");
 const Io = std.Io;
+const temporal = toml.temporal;
 
 fn printIndent(w: anytype, n: usize) !void {
     var i: usize = 0;
@@ -24,10 +25,22 @@ fn printTable(w: anytype, tbl: *toml.Table, indent: usize) !void {
             .integer => |v| try printScalar(w, "33", "{d}", .{v.value}),
             .float => |v| try printScalar(w, "35", "{d}", .{v}),
             .boolean => |v| try printScalar(w, "33", "{s}", .{if (v) "true" else "false"}),
-            .offset_datetime => |v| try printScalar(w, "34", "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}{s:d:0>2}:{d:0>2}", .{ v.date.year, v.date.month, v.date.day, v.time.hour, v.time.minute, v.time.second, if (v.offset_minutes < 0) '-' else '+', @abs(@divTrunc(v.offset_minutes, 60)), @abs(@mod(v.offset_minutes, 60)) }),
-            .local_datetime => |v| try printScalar(w, "34", "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}", .{ v.date.year, v.date.month, v.date.day, v.time.hour, v.time.minute, v.time.second }),
-            .local_date => |v| try printScalar(w, "34", "{d:0>4}-{d:0>2}-{d:0>2}", .{ v.year, v.month, v.day }),
-            .local_time => |v| try printScalar(w, "34", "{d:0>2}:{d:0>2}:{d:0>2}", .{ v.hour, v.minute, v.second }),
+            .offset_datetime => |v| {
+                var buf: [64]u8 = undefined;
+                try printScalar(w, "34", "{s}", .{temporal.formatOffsetDateTime(&buf, v)});
+            },
+            .local_datetime => |v| {
+                var buf: [48]u8 = undefined;
+                try printScalar(w, "34", "{s}", .{temporal.formatLocalDateTime(&buf, v)});
+            },
+            .local_date => |v| {
+                var buf: [16]u8 = undefined;
+                try printScalar(w, "34", "{s}", .{temporal.formatLocalDate(&buf, v)});
+            },
+            .local_time => |v| {
+                var buf: [24]u8 = undefined;
+                try printScalar(w, "34", "{s}", .{temporal.formatLocalTime(&buf, v)});
+            },
             .array => |arr| {
                 try w.writeAll("\x1b[33m[");
                 if (arr.items.len <= 4) {
@@ -51,14 +64,6 @@ fn printTable(w: anytype, tbl: *toml.Table, indent: usize) !void {
                 try printTable(w, sub, indent + 1);
             },
         }
-    }
-}
-
-fn printArrayOfTables(w: anytype, key: []const u8, arr: *toml.Array, indent: usize) !void {
-    for (arr.items, 0..) |item, i| {
-        try printIndent(w, indent);
-        try w.print("\x1b[1;33m[[{s} #{d}]]\x1b[0m\n", .{ key, i + 1 });
-        try printTable(w, item.table, indent + 1);
     }
 }
 
@@ -95,7 +100,17 @@ pub fn main(init: std.process.Init) !void {
     try printKey(w, 1, "is_clinical");
     try printScalar(w, "33", "{s}", .{if (root.get("is_clinical").?.boolean) "true" else "false"});
     try printKey(w, 1, "analysis_timestamp");
-    try printScalar(w, "34", "2025-04-02T09:15:00+00:00", .{});
+    switch (root.get("analysis_timestamp").?) {
+        .offset_datetime => |v| {
+            var buf: [64]u8 = undefined;
+            try printScalar(w, "34", "{s}", .{temporal.formatOffsetDateTime(&buf, v)});
+        },
+        .local_datetime => |v| {
+            var buf: [48]u8 = undefined;
+            try printScalar(w, "34", "{s}", .{temporal.formatLocalDateTime(&buf, v)});
+        },
+        else => return error.UnexpectedTimestampType,
+    }
     try w.writeAll("\n");
 
     // ─── Samples ───

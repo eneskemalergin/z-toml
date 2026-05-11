@@ -15,13 +15,18 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 - `tools/bench.zig` — inline benchmark via `zig build bench`.
 - `tools/bench_runner.zig` + `tools/zebrac` — hardware-counter profiling (instructions, cache misses, RSS).
 - `examples/pyproject_demo.zig` — end-to-end demo: parse `pyproject.toml` → JSON + round-trip TOML + canonical TOML. Run via `zig build pyproject`.
-- 15 writeToml round-trip tests, 6 formatter tests, 4 fidelity tests. Suite now 130+ tests.
+- `src/temporal.zig` shared date/time formatting helpers used by JSON output, TOML output, corpus comparisons, and examples.
+- `test/output.zig` and `test/support.zig` for output-focused coverage and shared test file loading.
+- 15 writeToml round-trip tests, 6 formatter tests, 4 fidelity tests, and the extracted output test module. Suite now 126 tests.
 
 ### Changed
 
 - **`Value.integer` → `IntValue{value, base}`** — hex `0xFF` now writes back as `0xFF` instead of `255`. Access `.integer.value` for `i64`.
 - `build.zig.zon` → `0.2.0`.
 - Performance improvements: basic string fast path (−3.1% parse instructions), batched string escaping in writer (−3.0% write instructions), KV pre-collection with EntryKind (−3.3% branch misses), ArrayList pre-allocation. Combined parse+write: 5.55M → 5.38M instructions (−3.1%). RSS unchanged at 1.07MB. No leaks.
+- Examples and docs updated for `IntValue`: dynamic integer access now uses `.integer.value`.
+- Output and formatter tests moved out of `test/features.zig` into `test/output.zig` to keep parser and serializer coverage separate.
+- Benchmarks now isolate arena allocations per input file, use the same parse → write → parse round-trip semantics in both runners, and use a portable monotonic timer path.
 
 ### Fixed
 
@@ -29,6 +34,10 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 - AOT context-scoping bug: writer used dotted keys for sub-tables, breaking TOML context after `[[header]]`. Switched to `[header]` syntax for all sub-table navigation.
 - Arrays at root level silently dropped: Pass 1 didn't handle `.array` — added non-AOT array serialization.
 - Control chars in basic string fast path caused 5 invalid corpus files to parse successfully — added control-byte guard.
+- `parse_example.zig` and `parse_proteomics.zig` no longer format `IntValue` as a bare integer struct.
+- `parse_proteomics.zig` now prints the parsed `analysis_timestamp` value instead of hardcoding it, and no longer carries the dead `printArrayOfTables` helper.
+- Temporal formatting logic is deduplicated across serializers, tests, and examples.
+- `test/fuzz.zig` now walks nested arrays recursively instead of stopping after one array level.
 
 ---
 

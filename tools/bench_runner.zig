@@ -2,7 +2,6 @@
 ///   ./bench_runner <file.toml> <parse|write|json|rt>
 /// Exits 0 on success, non-zero on failure.
 /// Zebrac measures wall-clock time of the process.
-
 const std = @import("std");
 const toml = @import("toml");
 
@@ -31,6 +30,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, mode, "rt")) {
             var w = std.Io.Writer.fixed(&buf);
             try toml.writeToml(.{ .table = root }, &w);
+            _ = try toml.parseSlice(gpa, w.buffered(), null);
         }
     } else if (std.mem.eql(u8, mode, "write")) {
         const root = try toml.parseSlice(gpa, src, null);
