@@ -8,8 +8,16 @@ pub const HintMap = std.array_hash_map.String;
 
 pub const FormatHints = struct {
     string_styles: ?*HintMap(StringStyle) = null,
-    /// Comments keyed by dotted path (from root). Leading comments
-    /// before a key are stored under that key's path. Trailing comments
-    /// after a value are stored under the same key.
     comments: ?*HintMap([]const u8) = null,
+};
+
+pub const OutputProfile = enum {
+    /// Inline scalar-only tables, no hints used. Current default.
+    compact,
+    /// Keep entry order and string styles.
+    preserve,
+    /// Sorted keys, deterministic, prefer headers.
+    canonical,
+    /// Preserve everything including comments.
+    faithful,
 };

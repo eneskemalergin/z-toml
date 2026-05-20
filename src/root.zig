@@ -137,3 +137,21 @@ pub fn deinitViewTable(tbl: *TableView, gpa: std.mem.Allocator, input: []const u
 pub fn cloneValue(gpa: std.mem.Allocator, view: ValueView, input: []const u8) std.mem.Allocator.Error!Value {
     return view_mod.cloneValue(gpa, view, input);
 }
+
+// ─── Output profiles ────────────────────────────────────────────────────────────
+
+pub const OutputProfile = hints_mod.OutputProfile;
+
+/// Serialize `value` as TOML with a named profile.
+///
+/// Profiles set multiple `WriteOptions` at once and optionally
+/// consume `hints` for string style and comment fidelity.
+pub fn writeTomlWithProfile(
+    value: Value,
+    w: *std.Io.Writer,
+    profile: OutputProfile,
+    hints: ?*FormatHints,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    return output_toml.writeTomlWithProfile(value, w, profile, hints, gpa);
+}

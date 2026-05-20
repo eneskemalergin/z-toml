@@ -7,6 +7,33 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- `WriteOptions.preserve_order`: single-pass writer that emits entries in insertion order. Scalar siblings after a table/AOT use dotted-key prefix instead of context-reset headers.
+- `FormatHints`, `StringStyle`, `HintMap` types for format-fidelity tracking during parse.
+- `parseSliceWithHints(gpa, input, err_info, hints)`: parse with format hints collection (string styles, comments).
+- `parseSliceView(gpa, input, err_info)`: zero-copy parse returning `ValueView` tree where strings borrow from the input buffer.
+- `ValueView`, `TableView`, `ArrayListView` types for zero-copy value trees.
+- `cloneValue(gpa, view, input)`: deep-copy a `ValueView` tree into an owned `Value` tree.
+- `deinitViewTable(tbl, gpa, input)`: free a view tree (containers + owned strings, leaves borrowed strings).
+- `src/view.zig`: zero-copy view module.
+- `src/output/hints.zig`: format hints module.
+- `OutputProfile` enum (compact, preserve, canonical, faithful).
+- `writeTomlWithProfile(value, w, profile, hints, gpa)`: profile-based TOML output that consumes FormatHints.
+- Comment emission: `# text` lines written before key/value entries when hints are provided.
+- Literal string style preservation: `'...'` output when original used literal strings.
+
+### Changed
+
+- Parser refactored to `ParserTy(V)`: comptime-generic over output type. `ParserVal` (owned) and `ParserView` (zero-copy) share one implementation.
+- `WriteOptions.prefer_headers` now cooperates with `preserve_order`: all tables use header syntax when either flag is set.
+- Writer functions (`writeTableInner`, `writeKV`, `writeValue`) now accept optional `FormatHints` for comment and string-style consumption.
+
+### Fixed
+
+- `bench_runner.zig` memory leak: wrapped allocations in `ArenaAllocator`.
+- `fromToml` hook in `static.zig`: `OutOfMemory` errors now propagate instead of being silently converted to `TypeMismatch`.
+
 ## [0.2.0] - 2026-05-11 - [Tagged]
 
 ### Added
