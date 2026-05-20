@@ -6,14 +6,14 @@
 <h1 align="center">z-toml</h1>
 
 <p align="center">
-  TOML v1.1.0 parser for Zig 0.16. Single-pass, no dependencies, corpus-validated. Typed and dynamic APIs.
+  TOML v1.1.0 parser for Zig 0.16. Single-pass, zero-dependency, corpus-validated. Typed, dynamic, and zero-copy APIs.
 </p>
 
 <p align="center">
   <a href="https://github.com/eneskemalergin/z-toml/actions/workflows/ci.yml">
     <img src="https://github.com/eneskemalergin/z-toml/actions/workflows/ci.yml/badge.svg?style=flat-square" alt="CI">
   </a>
-  <img src="https://img.shields.io/badge/version-v0.2.0-2C8EBB?style=flat-square" alt="v0.2.0">
+  <img src="https://img.shields.io/badge/version-v0.3.0-2C8EBB?style=flat-square" alt="v0.3.0">
   <img src="https://img.shields.io/badge/zig-0.16.0-F7A41D?style=flat-square&logo=zig&logoColor=white" alt="Zig 0.16.0">
   <img src="https://img.shields.io/badge/TOML-v1.1.0-9C4221?style=flat-square" alt="TOML v1.1.0">
   <img src="https://img.shields.io/badge/license-MIT-4B9D6E?style=flat-square" alt="MIT">
@@ -25,8 +25,13 @@
 - Full TOML 1.1.0 coverage: all value types, dotted keys, inline tables, arrays of tables, multi-line strings, escape sequences, date/time types
 - `parseInto(T)`: map TOML directly onto a Zig struct with comptime reflection. No manual tree walking.
 - `parseSlice`: dynamic tree API for unknown-shape documents
+- `parseSliceView`: zero-copy parse returning borrowed strings from the input buffer
 - `toJson`: serialize a parsed tree to JSON
 - `writeToml` / `writeTomlOpts`: serialize back to TOML text
+- `writeTomlWithProfile`: profile-based output (compact, preserve, canonical, faithful)
+- `writeTomlView`: serialize a zero-copy view directly to TOML
+- `parseSliceWithHints`: capture string styles and comments for format-fidelity roundtrips
+- `cloneValue`: deep-copy a zero-copy view into an owned tree
 - Validated against the [toml-lang/toml-test](https://github.com/toml-lang/toml-test) corpus (215 valid + 467 invalid files)
 - Clear error messages with line and column numbers
 - No dependencies beyond the Zig standard library
@@ -42,7 +47,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .z_toml = .{
-        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.2.0.tar.gz",
+        .url = "https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.3.0.tar.gz",
         .hash = "<run zig fetch to get the hash>",
     },
 },
@@ -51,7 +56,7 @@ Add z-toml as a dependency in your `build.zig.zon`:
 Or use `zig fetch` to add it automatically:
 
 ```sh
-zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.2.0.tar.gz
+zig fetch --save https://github.com/eneskemalergin/z-toml/archive/refs/tags/v0.3.0.tar.gz
 ```
 
 Then wire it up in your `build.zig`:
@@ -274,8 +279,114 @@ pub const WriteOptions = struct {
     sort_keys: bool = false,
     prefer_headers: bool = false,
     use_escape_e: bool = false,
+    preserve_order: bool = false,
 };
 ```
+
+### `parseSliceWithHints`
+
+```zig
+pub fn parseSliceWithHints(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    hints: ?*FormatHints,
+) ParseError!*Table
+```
+
+Same as `parseSlice` but records string styles and comments into `FormatHints` during parsing. Pass the collected hints to `writeTomlWithProfile` for format-fidelity output.
+
+### `FormatHints`
+
+```zig
+pub const FormatHints = struct {
+    string_styles: ?*HintMap(StringStyle) = null,
+    comments: ?*HintMap([]const u8) = null,
+};
+pub const StringStyle = enum(u2) { basic, literal, multiline_basic, multiline_literal };
+pub const HintMap = std.array_hash_map.String;
+```
+
+### `OutputProfile`
+
+```zig
+pub const OutputProfile = enum { compact, preserve, canonical, faithful };
+```
+
+Each profile maps to a set of `WriteOptions` plus optional hint consumption:
+
+| Profile     | sort_keys | prefer_headers | use_escape_e | Hints consumed                          |
+| ----------- | --------- | -------------- | ------------ | --------------------------------------- |
+| `compact`   | false     | false          | false        | none                                    |
+| `preserve`  | false     | true           | false        | string_styles, preserve_order           |
+| `canonical` | true      | true           | true         | none                                    |
+| `faithful`  | false     | true           | true         | string_styles, comments, preserve_order |
+
+### `writeTomlWithProfile`
+
+```zig
+pub fn writeTomlWithProfile(
+    value: Value,
+    w: *std.Io.Writer,
+    profile: OutputProfile,
+    hints: ?*FormatHints,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void
+```
+
+Serializes `value` as TOML using a named profile. When hints are provided, the writer preserves string styles (e.g. literal `'...'` strings) and emits comments.
+
+### `parseSliceView`
+
+```zig
+pub fn parseSliceView(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+) ParseError!*TableView
+```
+
+Zero-copy parse: strings borrow from `input` instead of being allocated. Caller must keep `input` alive while the view tree is in use. Free with `deinitViewTable`.
+
+### `ValueView` / `TableView`
+
+```zig
+pub const ValueView = union(enum) { string, integer, float, boolean, offset_datetime, local_datetime, local_date, local_time, array: *ArrayListView, table: *TableView };
+pub const TableView = std.array_hash_map.String(ValueView);
+pub const ArrayListView = std.ArrayList(ValueView);
+```
+
+Zero-copy value tree. Strings are `[]const u8` slices into the parse input. Container types still heap-allocate but values inside borrow.
+
+### `deinitViewTable`
+
+```zig
+pub fn deinitViewTable(tbl: *TableView, gpa: std.mem.Allocator, input: []const u8) void
+```
+
+Frees container structs and any owned string allocations (escaped strings). Borrowed strings pointing into `input` are left alone.
+
+### `writeTomlView`
+
+```zig
+pub fn writeTomlView(
+    view: ValueView,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: std.mem.Allocator,
+    input: []const u8,
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void
+```
+
+Serialize a `ValueView` tree to TOML. Internally clones to an owned `Value` and writes.
+
+### `cloneValue`
+
+```zig
+pub fn cloneValue(gpa: std.mem.Allocator, view: ValueView, input: []const u8) std.mem.Allocator.Error!Value
+```
+
+Deep-copy a value from a view tree into an owned `Value` tree. All strings are freshly allocated. Use this when you need to keep values after the input buffer is freed.
 
 ### `ErrorInfo`
 
@@ -338,7 +449,7 @@ Parses `examples/proteomics.toml`, a 678-line bioinformatics configuration that 
 zig build test
 ```
 
-Runs 126 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
+Runs 150 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
 ## Build steps
 
@@ -351,19 +462,17 @@ Runs 126 tests: unit tests for both APIs plus the full toml-lang/toml-test corpu
 
 ## Roadmap
 
-| Version    | Feature                 | Notes                                                                                                                                    |
-| ---------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **v0.3.0** | Zero-copy strings       | Return `[]const u8` slices into the input buffer instead of allocating copies. Architecture change; requires caller to keep input alive. |
-| **v0.3.1** | `cloneValue` helper     | Deep-copy a `Value` subtree into a fresh allocator. Companion to zero-copy.                                                              |
-| **v0.4.0** | In-place value rewriter | Modify specific TOML keys without re-serializing. Comments and formatting survive the edit.                                              |
-| **v1.0.0** | `z-toml` CLI            | Standalone binary with `to-json`, `fmt`, `lint`, and `rewrite` subcommands. Marks API stability commitment.                              |
+| Version    | Feature                 | Notes                                                                                                       |
+| ---------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **v0.4.0** | In-place value rewriter | Modify specific TOML keys without re-serializing. Comments and formatting survive the edit.                 |
+| **v1.0.0** | `z-toml` CLI            | Standalone binary with `to-json`, `fmt`, `lint`, and `rewrite` subcommands. Marks API stability commitment. |
 
 ## References
 
 - [TOML v1.1.0 spec](https://toml.io/en/v1.1.0): the specification this parser implements
 - [toml-lang/toml-test](https://github.com/toml-lang/toml-test): the corpus used to validate correctness (215 valid, 467 invalid files)
 - [TOML changelog](https://github.com/toml-lang/toml/blob/main/CHANGELOG.md): what changed from v1.0.0 to v1.1.0
-- [zig.pkg index](https://pkg.ziglang.org): the Zig community package index where this library is listed
+- [zigistry](https://zigistry.dev/): the Zig community package index where this library is listed
 
 ## License
 

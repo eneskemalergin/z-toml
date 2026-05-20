@@ -586,3 +586,140 @@ test "formatter: prefer_headers round-trips correctly" {
     defer toml.deinit(root2, gpa);
     try std.testing.expect(tablesEqual(root, root2));
 }
+
+// ─── Phase 6 test coverage ─────────────────────────────────────────────────────
+
+test "writeToml: integer hex base roundtrips as 0x" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "h = 0xDEAD\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqual(.hex, root.get("h").?.integer.base);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expectEqual(.hex, root2.get("h").?.integer.base);
+}
+
+test "writeToml: integer octal base roundtrips as 0o" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "o = 0o755\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqual(.octal, root.get("o").?.integer.base);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expectEqual(.octal, root2.get("o").?.integer.base);
+}
+
+test "writeToml: integer binary base roundtrips as 0b" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "b = 0b1010\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqual(.binary, root.get("b").?.integer.base);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expectEqual(.binary, root2.get("b").?.integer.base);
+}
+
+test "writeToml: empty array of tables roundtrips" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "[[products]]\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expect(root2.get("products").? == .array);
+}
+
+test "toJson: nested array in array" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "x = [[1, 2], [3]]\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.toJson(.{ .table = root }, &w);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "[[1,2],[3]]"));
+}
+
+test "toJson: nested table produces nested JSON" {
+    const gpa = std.testing.allocator;
+    const src = "[a]\nb = 1\n[a.c]\nd = 2\n";
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+    var buf: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.toJson(.{ .table = root }, &w);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "\"c\":{\"d\":2}"));
+}
+
+test "toJson: control chars produce \\uXXXX" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"a\\x01b\"\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.toJson(.{ .table = root }, &w);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "\\u0001"));
+}
+
+test "writeToml: key with single quote uses basic" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "\"it's\" = \"val\"\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "\"it's\""));
+}
+
+test "writeToml: key with hash roundtrips" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "\"key#1\" = \"val\"\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expectEqualStrings("val", root2.get("key#1").?.string);
+}
+
+test "writeToml: key with equals roundtrips" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "\"a=b\" = \"val\"\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expectEqualStrings("val", root2.get("a=b").?.string);
+}
+
+test "writeToml: key with brackets roundtrips" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "\"a[b]\" = \"val\"\n", null);
+    defer toml.deinit(root, gpa);
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    var err: toml.ErrorInfo = .{};
+    const root2 = try toml.parseSlice(gpa, w.buffered(), &err);
+    defer toml.deinit(root2, gpa);
+    try std.testing.expectEqualStrings("val", root2.get("a[b]").?.string);
+}

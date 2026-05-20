@@ -1,3 +1,4 @@
+//! Format hints types for TOML format-fidelity tracking.
 const std = @import("std");
 
 pub const StringStyle = enum(u2) { basic, literal, multiline_basic, multiline_literal };

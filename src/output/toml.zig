@@ -75,7 +75,7 @@ fn writeBasicString(w: *std.Io.Writer, s: []const u8, opts: WriteOptions) std.Io
     var start: usize = 0;
     for (s, 0..) |c, i| {
         if (!needsEscape(c)) continue;
-        // Flush unescaped run before the escape point
+        // Emit unescaped characters as a batch to reduce write call count.
         if (i > start) try w.writeAll(s[start..i]);
         switch (c) {
             '"' => try w.writeAll("\\\""),
@@ -230,8 +230,8 @@ fn kvLessThan(_: void, a: KeyValue, b: KeyValue) bool {
     return std.mem.order(u8, a.key, b.key) == .lt;
 }
 
-/// Collect key-value pairs from `tbl` with pre-computed entry kinds.
-/// Avoids hash lookups and duplicate `isInlineTable` calls during iteration.
+// Collect key-value pairs from `tbl` with pre-computed entry kinds.
+// Avoids hash lookups and duplicate `isInlineTable` calls during iteration.
 fn kvsOf(tbl: *Table, opts: WriteOptions, gpa: Allocator) Allocator.Error![]KeyValue {
     const count = tbl.count();
     if (count == 0) return &.{};
@@ -308,7 +308,7 @@ fn writeTableInner(
         return;
     }
 
-    // Build parent path string for comment/style lookups
+        // Build parent path for FormatHints lookups (comments and string styles).
     var parent_path: []const u8 = "";
     var pp_buf: [512]u8 = undefined;
     if (hints != null and path.len > 0) {
@@ -328,7 +328,7 @@ fn writeTableInner(
         }
     }
 
-    // Pass 1: scalars and inline tables
+    // Three-pass dispatch: scalars first so they appear before table headers.
     for (kvs) |kv| {
         switch (kv.kind) {
             .plain, .inline_table => try writeKV(w, kv.key, kv.val, opts, hints, parent_path),
@@ -336,7 +336,7 @@ fn writeTableInner(
         }
     }
 
-    // Pass 2: nested tables (emit as [path.key] headers)
+    // Tables come second: each one emits a [header] and recurses.
     for (kvs) |kv| {
         if (kv.kind == .table) {
             try w.writeByte('\n');
@@ -347,7 +347,7 @@ fn writeTableInner(
         }
     }
 
-    // Pass 3: arrays of tables
+    // AOTs last: each element gets a [[header]] and recurses with emit=false.
     for (kvs) |kv| {
         if (kv.kind == .aot) {
             @memcpy(path_buf[0..path.len], path);

@@ -820,3 +820,115 @@ test "fromToml: hook on root struct fires instead of mapTable" {
     const cfg = try toml.parseInto(RootCustom, arena.allocator(), "my_title = \"custom mapping\"", null);
     try std.testing.expectEqualStrings("custom mapping", cfg.title);
 }
+
+// ─── Phase 6 test coverage ─────────────────────────────────────────────────────
+
+test "parseInto: LocalDate field maps from TOML local date" {
+    const Cfg = struct { date: toml.LocalDate };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cfg = try toml.parseInto(Cfg, arena.allocator(), "date = 2024-03-15", null);
+    try std.testing.expectEqual(@as(u16, 2024), cfg.date.year);
+    try std.testing.expectEqual(@as(u8, 3), cfg.date.month);
+    try std.testing.expectEqual(@as(u8, 15), cfg.date.day);
+}
+
+test "parseInto: LocalTime field maps from TOML local time" {
+    const Cfg = struct { time: toml.LocalTime };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cfg = try toml.parseInto(Cfg, arena.allocator(), "time = 14:30:00", null);
+    try std.testing.expectEqual(@as(u8, 14), cfg.time.hour);
+    try std.testing.expectEqual(@as(u8, 30), cfg.time.minute);
+}
+
+test "parseInto: LocalDateTime field maps from TOML local datetime" {
+    const Cfg = struct { dt: toml.LocalDateTime };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cfg = try toml.parseInto(Cfg, arena.allocator(), "dt = 2024-01-15T14:30:00", null);
+    try std.testing.expectEqual(@as(u16, 2024), cfg.dt.date.year);
+    try std.testing.expectEqual(@as(u8, 14), cfg.dt.time.hour);
+}
+
+test "escape: \\b backspace produces byte 0x08" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"a\\bb\"\n", null);
+    defer toml.deinit(root, gpa);
+    const s = root.get("s").?.string;
+    try std.testing.expectEqual(@as(usize, 3), s.len);
+    try std.testing.expectEqual(@as(u8, 0x08), s[1]);
+}
+
+test "escape: \\f form feed produces byte 0x0C" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"a\\fb\"\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqual(@as(u8, 0x0C), root.get("s").?.string[1]);
+}
+
+test "escape: \\r carriage return produces byte 0x0D" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"a\\rb\"\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqual(@as(u8, 0x0D), root.get("s").?.string[1]);
+}
+
+test "escape: \\\" produces quote byte" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"a\\\"b\"\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqualStrings("a\"b", root.get("s").?.string);
+}
+
+test "escape: \\\\ produces backslash byte" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"a\\\\b\"\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqualStrings("a\\b", root.get("s").?.string);
+}
+
+test "escape: \\UHHHHHHHH produces large unicode scalar" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "s = \"\\U0001F600\"\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqualStrings("\xF0\x9F\x98\x80", root.get("s").?.string);
+}
+
+test "escape: line-ending backslash trims whitespace in multi-line" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\s = """\
+        \\  continued"""
+    ;
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expectEqualStrings("continued", root.get("s").?.string);
+}
+
+test "parse +inf as positive infinity" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "x = +inf\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expect(std.math.isInf(root.get("x").?.float));
+    try std.testing.expect(root.get("x").?.float > 0);
+}
+
+test "parse +nan as NaN" {
+    const gpa = std.testing.allocator;
+    const root = try toml.parseSlice(gpa, "x = +nan\n", null);
+    defer toml.deinit(root, gpa);
+    try std.testing.expect(std.math.isNan(root.get("x").?.float));
+}
+
+test "parseInto: optional with default field absent yields null" {
+    const Cfg = struct {
+        required: []const u8,
+        optional_with_default: ?u32 = 42,
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cfg = try toml.parseInto(Cfg, arena.allocator(), "required = \"x\"", null);
+    try std.testing.expectEqualStrings("x", cfg.required);
+    try std.testing.expectEqual(@as(?u32, null), cfg.optional_with_default);
+}

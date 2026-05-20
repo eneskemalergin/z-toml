@@ -5,7 +5,7 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
-## [Unreleased]
+## [0.3.0] - 2026-05-20 - [Tagged]
 
 ### Added
 
@@ -22,6 +22,8 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 - `writeTomlWithProfile(value, w, profile, hints, gpa)`: profile-based TOML output that consumes FormatHints.
 - Comment emission: `# text` lines written before key/value entries when hints are provided.
 - Literal string style preservation: `'...'` output when original used literal strings.
+- `writeTomlView(view, w, opts, gpa, input)`: serialize a ValueView tree directly to TOML text.
+- Suite now 150 tests (126 existing + 24 new coverage tests).
 
 ### Changed
 
@@ -156,3 +158,4 @@ First public release.
 [0.1.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.1.0
 [0.1.2]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.1.2
 [0.2.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.2.0
+[0.3.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.3.0

@@ -1,3 +1,4 @@
+//! Zero-copy ValueView types and helpers.
 const std = @import("std");
 const types = @import("value.zig");
 

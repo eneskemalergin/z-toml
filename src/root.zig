@@ -138,6 +138,24 @@ pub fn cloneValue(gpa: std.mem.Allocator, view: ValueView, input: []const u8) st
     return view_mod.cloneValue(gpa, view, input);
 }
 
+/// Serialize a ValueView tree to TOML text. Internally clones to Value.
+pub fn writeTomlView(
+    view: ValueView,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: std.mem.Allocator,
+    input: []const u8,
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    const val = try cloneValue(gpa, view, input);
+    defer switch (val) {
+        .table => |tbl| {
+            deinit(tbl, gpa);
+        },
+        else => parser_mod.deinitValue(val, gpa),
+    };
+    try writeTomlOpts(val, w, opts, gpa);
+}
+
 // ─── Output profiles ────────────────────────────────────────────────────────────
 
 pub const OutputProfile = hints_mod.OutputProfile;
