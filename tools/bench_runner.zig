@@ -7,6 +7,9 @@ const toml = @import("toml");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const aa = arena.allocator();
 
     var arg_iter = std.process.Args.iterate(init.minimal.args);
     defer arg_iter.deinit();
@@ -23,21 +26,21 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     var buf: [1 << 22]u8 = undefined;
 
-    const src = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 22));
+    const src = try std.Io.Dir.cwd().readFileAlloc(io, path, aa, .limited(1 << 22));
 
     if (std.mem.eql(u8, mode, "parse") or std.mem.eql(u8, mode, "rt")) {
-        const root = try toml.parseSlice(gpa, src, null);
+        const root = try toml.parseSlice(aa, src, null);
         if (std.mem.eql(u8, mode, "rt")) {
             var w = std.Io.Writer.fixed(&buf);
             try toml.writeToml(.{ .table = root }, &w);
-            _ = try toml.parseSlice(gpa, w.buffered(), null);
+            _ = try toml.parseSlice(aa, w.buffered(), null);
         }
     } else if (std.mem.eql(u8, mode, "write")) {
-        const root = try toml.parseSlice(gpa, src, null);
+        const root = try toml.parseSlice(aa, src, null);
         var w = std.Io.Writer.fixed(&buf);
         try toml.writeToml(.{ .table = root }, &w);
     } else if (std.mem.eql(u8, mode, "json")) {
-        const root = try toml.parseSlice(gpa, src, null);
+        const root = try toml.parseSlice(aa, src, null);
         var w = std.Io.Writer.fixed(&buf);
         try toml.toJson(.{ .table = root }, &w);
     } else {

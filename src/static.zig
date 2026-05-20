@@ -52,8 +52,9 @@ fn mapTable(comptime T: type, table: *Table, gpa: Allocator) ParseIntoError!T {
     }
 
     if (comptime isContainer(T)) if (@hasDecl(T, "fromToml"))
-        return T.fromToml(.{ .table = table }, gpa) catch |err| switch (err) {
-            else => error.TypeMismatch,
+        return T.fromToml(.{ .table = table }, gpa) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.TypeMismatch;
         };
 
     var result: T = undefined;
@@ -75,8 +76,9 @@ fn mapTable(comptime T: type, table: *Table, gpa: Allocator) ParseIntoError!T {
 
 fn mapValue(comptime T: type, value: Value, gpa: Allocator) ParseIntoError!T {
     if (comptime isContainer(T)) if (@hasDecl(T, "fromToml"))
-        return T.fromToml(value, gpa) catch |err| switch (err) {
-            else => error.TypeMismatch,
+        return T.fromToml(value, gpa) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.TypeMismatch;
         };
 
     // Datetime structs are matched by type identity before the generic struct branch.
