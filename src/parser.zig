@@ -1,6 +1,7 @@
 //! TOML v1.1.0 single-pass recursive-descent parser.
 const std = @import("std");
 const types = @import("value.zig");
+const hints_mod = @import("output/hints.zig");
 
 pub const Table = types.Table;
 pub const Array = types.Array;
@@ -70,8 +71,13 @@ const Parser = struct {
     meta_arena: std.heap.ArenaAllocator,
     table_metas: std.AutoHashMapUnmanaged(*Table, *TableMeta),
     err_info: ErrorInfo,
+    hints: ?*hints_mod.FormatHints,
+    table_path: std.ArrayListUnmanaged([]const u8),
+    cur_key_parts: ?[][]u8,
+    pending_comment: ?[]const u8,
+    trailing_path: std.ArrayListUnmanaged(u8),
 
-    fn init(gpa: Allocator, input: []const u8) Allocator.Error!Parser {
+    fn init(gpa: Allocator, input: []const u8, hints: ?*hints_mod.FormatHints) Allocator.Error!Parser {
         const root = try gpa.create(Table);
         root.* = .empty;
         errdefer {
@@ -90,6 +96,11 @@ const Parser = struct {
             .meta_arena = std.heap.ArenaAllocator.init(gpa),
             .table_metas = .empty,
             .err_info = .{},
+            .hints = hints,
+            .table_path = .empty,
+            .cur_key_parts = null,
+            .pending_comment = null,
+            .trailing_path = .empty,
         };
         errdefer p.meta_arena.deinit();
         _ = try p.createMeta(root, .root);
@@ -97,7 +108,59 @@ const Parser = struct {
     }
 
     fn deinit(self: *Parser) void {
+        self.table_path.deinit(self.meta_arena.allocator());
+        if (self.hints != null) self.trailing_path.deinit(self.gpa);
         self.meta_arena.deinit();
+    }
+
+    fn setTablePath(self: *Parser, parts: [][]u8) Allocator.Error!void {
+        const ma = self.meta_arena.allocator();
+        self.table_path.clearRetainingCapacity();
+        try self.table_path.ensureTotalCapacity(ma, parts.len);
+        for (parts) |part| {
+            const duped = try ma.dupe(u8, part);
+            self.table_path.appendAssumeCapacity(duped);
+        }
+    }
+
+    fn buildPath(self: *Parser, key_parts: [][]u8, out: *std.ArrayList(u8)) !void {
+        var first = true;
+        for (self.table_path.items) |part| {
+            if (!first) try out.append(self.gpa, '.');
+            first = false;
+            try out.appendSlice(self.gpa, part);
+        }
+        for (key_parts) |part| {
+            if (!first) try out.append(self.gpa, '.');
+            first = false;
+            try out.appendSlice(self.gpa, part);
+        }
+    }
+
+    fn dupedPath(self: *Parser, key_parts: [][]u8) Allocator.Error![]u8 {
+        var path_buf: std.ArrayList(u8) = .empty;
+        defer path_buf.deinit(self.gpa);
+        try self.buildPath(key_parts, &path_buf);
+        return path_buf.toOwnedSlice(self.gpa);
+    }
+
+    fn recordStringHint(self: *Parser, style: hints_mod.StringStyle) !void {
+        const hints = self.hints orelse return;
+        const styles = hints.string_styles orelse return;
+        const key_parts = self.cur_key_parts orelse return;
+
+        const owned = try self.dupedPath(key_parts);
+        errdefer self.gpa.free(owned);
+        try styles.put(self.gpa, owned, style);
+    }
+
+    fn recordCommentForKey(self: *Parser, text: []const u8, key_parts: [][]u8) !void {
+        const hints = self.hints orelse return;
+        const comments = hints.comments orelse return;
+
+        const owned = try self.dupedPath(key_parts);
+        errdefer self.gpa.free(owned);
+        try comments.put(self.gpa, owned, text);
     }
 
     fn createMeta(self: *Parser, tbl: *Table, kind: TableKind) Allocator.Error!*TableMeta {
@@ -177,11 +240,25 @@ const Parser = struct {
 
     fn skipComment(self: *Parser) ParseError!void {
         self.advance();
+        const start = self.pos;
         while (self.peek()) |c| {
             if (c == '\n' or c == '\r') break;
             if (c != '\t' and (c < 0x20 or c == 0x7F))
                 return self.fail("control character U+{X:0>4} not allowed in comment", .{c});
             self.advance();
+        }
+        const trimmed = std.mem.trim(u8, self.input[start..self.pos], " \t");
+        if (trimmed.len == 0) return;
+        const hints = self.hints orelse return;
+        const comments = hints.comments orelse return;
+
+        if (self.trailing_path.items.len > 0) {
+            const key_owned = try self.gpa.dupe(u8, self.trailing_path.items);
+            errdefer self.gpa.free(key_owned);
+            try comments.put(self.gpa, key_owned, trimmed);
+            self.trailing_path.clearRetainingCapacity();
+        } else {
+            self.pending_comment = trimmed;
         }
     }
 
@@ -270,7 +347,7 @@ const Parser = struct {
     fn parseBasicStringRaw(self: *Parser) ParseError![]u8 {
         try self.expect('"');
         // Fast path: scan for control chars, escape, or newline before `"`.
-        // Most strings lack escapes — avoids ArrayList + byte-by-byte append.
+        // Most strings lack escapes; avoids ArrayList + byte-by-byte append.
         {
             const start = self.pos;
             var i: usize = 0;
@@ -286,7 +363,7 @@ const Parser = struct {
                 i += 1;
             }
         }
-        // Slow path: has escapes — pre-allocate capacity (output ≤ remaining input).
+        // Slow path: has escapes; pre-allocate capacity (output ≤ remaining input).
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.gpa);
         try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
@@ -340,8 +417,12 @@ const Parser = struct {
         return .{ .string = try buf.toOwnedSlice(self.gpa) };
     }
 
-    fn parseMLBasicString(self: *Parser) ParseError!Value { return self.parseMLString(true); }
-    fn parseMLLiteralString(self: *Parser) ParseError!Value { return self.parseMLString(false); }
+    fn parseMLBasicString(self: *Parser) ParseError!Value {
+        return self.parseMLString(true);
+    }
+    fn parseMLLiteralString(self: *Parser) ParseError!Value {
+        return self.parseMLString(false);
+    }
 
     fn parseBasicStringContents(self: *Parser, buf: *std.ArrayList(u8)) ParseError!void {
         while (true) {
@@ -477,8 +558,24 @@ const Parser = struct {
     fn parseValue(self: *Parser) ParseError!Value {
         const c = self.peek() orelse return self.fail("expected a value", .{});
         return switch (c) {
-            '"' => if (self.peekAt(1) == '"' and self.peekAt(2) == '"') self.parseMLBasicString() else .{ .string = try self.parseBasicStringRaw() },
-            '\'' => if (self.peekAt(1) == '\'' and self.peekAt(2) == '\'') self.parseMLLiteralString() else .{ .string = try self.parseLiteralStringRaw() },
+            '"' => if (self.peekAt(1) == '"' and self.peekAt(2) == '"') blk: {
+                const v = try self.parseMLBasicString();
+                try self.recordStringHint(.multiline_basic);
+                break :blk v;
+            } else blk: {
+                const s = try self.parseBasicStringRaw();
+                try self.recordStringHint(.basic);
+                break :blk .{ .string = s };
+            },
+            '\'' => if (self.peekAt(1) == '\'' and self.peekAt(2) == '\'') blk: {
+                const v = try self.parseMLLiteralString();
+                try self.recordStringHint(.multiline_literal);
+                break :blk v;
+            } else blk: {
+                const s = try self.parseLiteralStringRaw();
+                try self.recordStringHint(.literal);
+                break :blk .{ .string = s };
+            },
             't' => self.parseTrue(),
             'f' => self.parseFalse(),
             '[' => self.parseArray(),
@@ -912,6 +1009,12 @@ const Parser = struct {
             for (key_parts.items) |p| self.gpa.free(p);
             key_parts.deinit(self.gpa);
         }
+
+        if (self.pending_comment) |c| {
+            try self.recordCommentForKey(c, key_parts.items);
+            self.pending_comment = null;
+        }
+
         self.skipInlineWs();
         try self.expect(']');
         self.skipInlineWs();
@@ -919,6 +1022,7 @@ const Parser = struct {
             return self.fail("extra content after table header", .{});
         try self.skipToEOL();
         self.cur = try self.navigateToHeaderTable(self.root, key_parts.items);
+        try self.setTablePath(key_parts.items);
     }
 
     fn parseAOTHeader(self: *Parser) ParseError!void {
@@ -930,6 +1034,12 @@ const Parser = struct {
             for (key_parts.items) |p| self.gpa.free(p);
             key_parts.deinit(self.gpa);
         }
+
+        if (self.pending_comment) |c| {
+            try self.recordCommentForKey(c, key_parts.items);
+            self.pending_comment = null;
+        }
+
         self.skipInlineWs();
         try self.expect(']');
         try self.expect(']');
@@ -938,6 +1048,7 @@ const Parser = struct {
             return self.fail("extra content after array-of-tables header", .{});
         try self.skipToEOL();
         self.cur = try self.navigateToAOT(self.root, key_parts.items);
+        try self.setTablePath(key_parts.items);
     }
 
     /// Navigate intermediate path segments (all but the last), creating implicit
@@ -1067,12 +1178,29 @@ const Parser = struct {
             for (key_parts.items) |p| self.gpa.free(p);
             key_parts.deinit(self.gpa);
         }
+
+        if (self.pending_comment) |c| {
+            try self.recordCommentForKey(c, key_parts.items);
+            self.pending_comment = null;
+        }
+
         self.skipInlineWs();
         try self.expect('=');
         self.skipInlineWs();
+        self.cur_key_parts = key_parts.items;
         const val = try self.parseValue();
+        self.cur_key_parts = null;
         errdefer deinitValue(val, self.gpa);
         try self.setNestedKey(self.cur, key_parts.items, val, false);
+
+        // Build trailing_path for trailing comment association
+        if (self.hints != null and self.hints.?.comments != null) {
+            self.trailing_path.clearRetainingCapacity();
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(self.gpa);
+            try self.buildPath(key_parts.items, &buf);
+            try self.trailing_path.appendSlice(self.gpa, buf.items);
+        }
     }
 
     fn parseDocument(self: *Parser) ParseError!void {
@@ -1082,13 +1210,19 @@ const Parser = struct {
             try self.skipTrivia();
             const c = self.peek() orelse break;
             switch (c) {
-                '[' => if (self.peekAt(1) == '[') try self.parseAOTHeader() else try self.parseTableHeader(),
+                '[' => {
+                    self.trailing_path.clearRetainingCapacity();
+                    if (self.peekAt(1) == '[') try self.parseAOTHeader() else try self.parseTableHeader();
+                },
                 else => {
                     try self.parseKeyVal();
                     self.skipInlineWs();
                     const next = self.peek() orelse break;
                     switch (next) {
-                        '\n', '\r' => try self.eatNewline(),
+                        '\n', '\r' => {
+                            self.trailing_path.clearRetainingCapacity();
+                            try self.eatNewline();
+                        },
                         '#' => {
                             try self.skipComment();
                             try self.eatNewline();
@@ -1128,10 +1262,19 @@ fn daysInMonth(year: u32, month: u32) u32 {
 }
 
 /// Parse `input` as TOML v1.1.0. Returns a heap-allocated root `*Table`
-/// on success. The caller owns all memory — free via `deinitTable(root, gpa)` + `gpa.destroy(root)`.
+/// on success. The caller owns all memory; free via `deinitTable(root, gpa)` + `gpa.destroy(root)`.
 /// On failure `err_info` (if non-null) is populated with line/col/message.
 pub fn parseSlice(gpa: Allocator, input: []const u8, err_info: ?*ErrorInfo) ParseError!*Table {
-    var parser = try Parser.init(gpa, input);
+    return parseSliceWithHints(gpa, input, err_info, null);
+}
+
+pub fn parseSliceWithHints(
+    gpa: Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    hints: ?*hints_mod.FormatHints,
+) ParseError!*Table {
+    var parser = try Parser.init(gpa, input, hints);
     defer parser.deinit();
     parser.parseDocument() catch |e| {
         if (err_info) |ei| ei.* = parser.err_info;

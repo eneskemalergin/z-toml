@@ -12,6 +12,7 @@ const typed_mod = @import("static.zig");
 pub const temporal = @import("temporal.zig");
 const json_output = @import("output/json.zig");
 const output_toml = @import("output/toml.zig");
+const hints_mod = @import("output/hints.zig");
 
 // ─── Re-export public types ───────────────────────────────────────────────────
 
@@ -86,3 +87,23 @@ pub const writeToml = output_toml.writeToml;
 /// `gpa` is used for key-sort allocation.
 pub const writeTomlOpts = output_toml.writeTomlOpts;
 pub const WriteOptions = output_toml.WriteOptions;
+
+// ─── Format hints ──────────────────────────────────────────────────────────────
+
+pub const FormatHints = hints_mod.FormatHints;
+pub const StringStyle = hints_mod.StringStyle;
+pub const HintMap = hints_mod.HintMap;
+
+/// Parse `input` with format hints collection.
+///
+/// Same as `parseSlice` but also populates `hints` with string styles,
+/// entry order, and comments captured during parsing. Pass null for
+/// no hint collection (identical to `parseSlice`).
+pub fn parseSliceWithHints(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    hints: ?*FormatHints,
+) ParseError!*Table {
+    return parser_mod.parseSliceWithHints(gpa, input, err_info, hints);
+}

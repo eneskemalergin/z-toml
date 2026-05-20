@@ -20,6 +20,9 @@ pub const WriteOptions = struct {
     prefer_headers: bool = false,
     /// Use `\e` escape for ESC (0x1B) instead of `\u001B`.
     use_escape_e: bool = false,
+    /// Preserve original entry order within tables (single-pass writer).
+    /// When false, writer uses three-pass (scalars, tables, AOTs).
+    preserve_order: bool = false,
 };
 
 // ─── Key quoting ───────────────────────────────────────────────────────────────
@@ -223,7 +226,7 @@ fn kvsOf(tbl: *Table, opts: WriteOptions, gpa: Allocator) Allocator.Error![]KeyV
         const kind: EntryKind = switch (val) {
             .string, .integer, .float, .boolean, .offset_datetime, .local_datetime, .local_date, .local_time => .plain,
             .array => if (isArrayOfTables(val)) .aot else .plain,
-            .table => |tbl2| if (!opts.prefer_headers and isInlineTable(tbl2)) .inline_table else .table,
+            .table => |tbl2| if (!opts.prefer_headers and !opts.preserve_order and isInlineTable(tbl2)) .inline_table else .table,
         };
         kvs[i] = .{ .key = entry.key_ptr.*, .val = val, .kind = kind };
         i += 1;
@@ -262,6 +265,11 @@ fn writeTableInner(
         try w.writeAll("]\n");
     }
 
+    if (opts.preserve_order) {
+        try writePreserveOrder(w, tbl, kvs, path, &path_buf, opts, gpa);
+        return;
+    }
+
     // Pass 1: scalars and inline tables
     for (kvs) |kv| {
         switch (kv.kind) {
@@ -295,6 +303,60 @@ fn writeTableInner(
                 try w.writeAll("]]\n");
                 try writeTableInner(w, item.table, aot_path, false, opts, gpa);
             }
+        }
+    }
+}
+
+fn writePreserveOrder(
+    w: *std.Io.Writer,
+    tbl: *Table,
+    kvs: []KeyValue,
+    path: [][]const u8,
+    path_buf: *[128][]const u8,
+    opts: WriteOptions,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    _ = tbl;
+    var use_dotted: bool = false;
+    for (kvs) |kv| {
+        switch (kv.kind) {
+            .plain, .inline_table => {
+                if (use_dotted and path.len > 0) {
+                    try w.writeByte('\n');
+                    try writeDottedPrefix(w, path);
+                    try w.writeByte('.');
+                    try writeQuoted(w, kv.key);
+                    try w.writeAll(" = ");
+                    try writeValue(w, kv.val, opts);
+                    try w.writeByte('\n');
+                } else {
+                    try writeKV(w, kv.key, kv.val, opts);
+                }
+            },
+            .table => {
+                use_dotted = false;
+                try w.writeByte('\n');
+                @memcpy(path_buf[0..path.len], path);
+                path_buf[path.len] = kv.key;
+                const child_path = path_buf[0 .. path.len + 1];
+                try writeTableInner(w, kv.val.table, child_path, true, opts, gpa);
+                use_dotted = path.len > 0;
+            },
+            .aot => {
+                use_dotted = false;
+                @memcpy(path_buf[0..path.len], path);
+                path_buf[path.len] = kv.key;
+                const aot_path = path_buf[0 .. path.len + 1];
+                const arr = kv.val.array;
+                for (arr.items) |item| {
+                    try w.writeByte('\n');
+                    try w.writeAll("[[");
+                    try writeDottedPrefix(w, aot_path);
+                    try w.writeAll("]]\n");
+                    try writeTableInner(w, item.table, aot_path, false, opts, gpa);
+                }
+                use_dotted = path.len > 0;
+            },
         }
     }
 }
