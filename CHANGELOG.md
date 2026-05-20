@@ -5,23 +5,54 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
-## [0.2.0] - 2026-05-11
+## [0.3.0] - 2026-05-20 - [Tagged]
 
 ### Added
 
-- `toml.writeToml(value, writer)` — serialize a `Value` tree to valid TOML v1.1.0. Uses `[header]` syntax for sub-tables, `[[...]]` for AOTs, inline `{...}` for scalar-only tables. Round-trips correctly (`parseSlice` → `writeToml` → `parseSlice`).
-- `toml.writeTomlOpts(value, writer, opts, allocator)` — with `WriteOptions.sort_keys`, `.prefer_headers`, `.use_escape_e`.
+- `WriteOptions.preserve_order`: single-pass writer that emits entries in insertion order. Scalar siblings after a table/AOT use dotted-key prefix instead of context-reset headers.
+- `FormatHints`, `StringStyle`, `HintMap` types for format-fidelity tracking during parse.
+- `parseSliceWithHints(gpa, input, err_info, hints)`: parse with format hints collection (string styles, comments).
+- `parseSliceView(gpa, input, err_info)`: zero-copy parse returning `ValueView` tree where strings borrow from the input buffer.
+- `ValueView`, `TableView`, `ArrayListView` types for zero-copy value trees.
+- `cloneValue(gpa, view, input)`: deep-copy a `ValueView` tree into an owned `Value` tree.
+- `deinitViewTable(tbl, gpa, input)`: free a view tree (containers + owned strings, leaves borrowed strings).
+- `src/view.zig`: zero-copy view module.
+- `src/output/hints.zig`: format hints module.
+- `OutputProfile` enum (compact, preserve, canonical, faithful).
+- `writeTomlWithProfile(value, w, profile, hints, gpa)`: profile-based TOML output that consumes FormatHints.
+- Comment emission: `# text` lines written before key/value entries when hints are provided.
+- Literal string style preservation: `'...'` output when original used literal strings.
+- `writeTomlView(view, w, opts, gpa, input)`: serialize a ValueView tree directly to TOML text.
+- Suite now 150 tests (126 existing + 24 new coverage tests).
+
+### Changed
+
+- Parser refactored to `ParserTy(V)`: comptime-generic over output type. `ParserVal` (owned) and `ParserView` (zero-copy) share one implementation.
+- `WriteOptions.prefer_headers` now cooperates with `preserve_order`: all tables use header syntax when either flag is set.
+- Writer functions (`writeTableInner`, `writeKV`, `writeValue`) now accept optional `FormatHints` for comment and string-style consumption.
+
+### Fixed
+
+- `bench_runner.zig` memory leak: wrapped allocations in `ArenaAllocator`.
+- `fromToml` hook in `static.zig`: `OutOfMemory` errors now propagate instead of being silently converted to `TypeMismatch`.
+
+## [0.2.0] - 2026-05-11 - [Tagged]
+
+### Added
+
+- `toml.writeToml(value, writer)`: serialize a `Value` tree to valid TOML v1.1.0. Uses `[header]` syntax for sub-tables, `[[...]]` for AOTs, inline `{...}` for scalar-only tables. Round-trips correctly (`parseSlice` → `writeToml` → `parseSlice`).
+- `toml.writeTomlOpts(value, writer, opts, allocator)`: with `WriteOptions.sort_keys`, `.prefer_headers`, `.use_escape_e`.
 - `toml.WriteOptions` struct.
-- `tools/bench.zig` — inline benchmark via `zig build bench`.
-- `tools/bench_runner.zig` + `tools/zebrac` — hardware-counter profiling (instructions, cache misses, RSS).
-- `examples/pyproject_demo.zig` — end-to-end demo: parse `pyproject.toml` → JSON + round-trip TOML + canonical TOML. Run via `zig build pyproject`.
+- `tools/bench.zig`: inline benchmark via `zig build bench`.
+- `tools/bench_runner.zig` + `tools/zebrac`: hardware-counter profiling (instructions, cache misses, RSS).
+- `examples/pyproject_demo.zig`: end-to-end demo; parse `pyproject.toml` → JSON + round-trip TOML + canonical TOML. Run via `zig build pyproject`.
 - `src/temporal.zig` shared date/time formatting helpers used by JSON output, TOML output, corpus comparisons, and examples.
 - `test/output.zig` and `test/support.zig` for output-focused coverage and shared test file loading.
 - 15 writeToml round-trip tests, 6 formatter tests, 4 fidelity tests, and the extracted output test module. Suite now 126 tests.
 
 ### Changed
 
-- **`Value.integer` → `IntValue{value, base}`** — hex `0xFF` now writes back as `0xFF` instead of `255`. Access `.integer.value` for `i64`.
+- **`Value.integer` → `IntValue{value, base}`**: hex `0xFF` now writes back as `0xFF` instead of `255`. Access `.integer.value` for `i64`.
 - `build.zig.zon` → `0.2.0`.
 - Performance improvements: basic string fast path (−3.1% parse instructions), batched string escaping in writer (−3.0% write instructions), KV pre-collection with EntryKind (−3.3% branch misses), ArrayList pre-allocation. Combined parse+write: 5.55M → 5.38M instructions (−3.1%). RSS unchanged at 1.07MB. No leaks.
 - Examples and docs updated for `IntValue`: dynamic integer access now uses `.integer.value`.
@@ -32,8 +63,8 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 - `path_buf[64]` overflow in writeTableInner (bumped to `[128]`).
 - AOT context-scoping bug: writer used dotted keys for sub-tables, breaking TOML context after `[[header]]`. Switched to `[header]` syntax for all sub-table navigation.
-- Arrays at root level silently dropped: Pass 1 didn't handle `.array` — added non-AOT array serialization.
-- Control chars in basic string fast path caused 5 invalid corpus files to parse successfully — added control-byte guard.
+- Arrays at root level silently dropped: Pass 1 didn't handle `.array`; added non-AOT array serialization.
+- Control chars in basic string fast path caused 5 invalid corpus files to parse successfully; added control-byte guard.
 - `parse_example.zig` and `parse_proteomics.zig` no longer format `IntValue` as a bare integer struct.
 - `parse_proteomics.zig` now prints the parsed `analysis_timestamp` value instead of hardcoding it, and no longer carries the dead `printArrayOfTables` helper.
 - Temporal formatting logic is deduplicated across serializers, tests, and examples.
@@ -125,3 +156,6 @@ First public release.
 - MIT license
 
 [0.1.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.1.0
+[0.1.2]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.1.2
+[0.2.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.2.0
+[0.3.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.3.0

@@ -12,6 +12,7 @@ const typed_mod = @import("static.zig");
 pub const temporal = @import("temporal.zig");
 const json_output = @import("output/json.zig");
 const output_toml = @import("output/toml.zig");
+const hints_mod = @import("output/hints.zig");
 
 // ─── Re-export public types ───────────────────────────────────────────────────
 
@@ -86,3 +87,89 @@ pub const writeToml = output_toml.writeToml;
 /// `gpa` is used for key-sort allocation.
 pub const writeTomlOpts = output_toml.writeTomlOpts;
 pub const WriteOptions = output_toml.WriteOptions;
+
+// ─── Format hints ──────────────────────────────────────────────────────────────
+
+pub const FormatHints = hints_mod.FormatHints;
+pub const StringStyle = hints_mod.StringStyle;
+pub const HintMap = hints_mod.HintMap;
+
+/// Parse `input` with format hints collection.
+///
+/// Same as `parseSlice` but also populates `hints` with string styles,
+/// entry order, and comments captured during parsing. Pass null for
+/// no hint collection (identical to `parseSlice`).
+pub fn parseSliceWithHints(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    hints: ?*FormatHints,
+) ParseError!*Table {
+    return parser_mod.parseSliceWithHints(gpa, input, err_info, hints);
+}
+
+// ─── Zero-copy view API ────────────────────────────────────────────────────────
+
+const view_mod = @import("view.zig");
+
+pub const ValueView = view_mod.ValueView;
+pub const TableView = view_mod.TableView;
+pub const ArrayListView = view_mod.ArrayListView;
+
+/// Parse without allocating string copies. Output borrows from `input`.
+/// Caller must keep `input` alive while the view tree is in use.
+/// Free with `deinitViewTable(root, gpa, input)`.
+pub fn parseSliceView(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+) ParseError!*TableView {
+    return parser_mod.parseSliceView(gpa, input, err_info);
+}
+
+/// Free a view tree (containers and owned string allocations, but not
+/// borrowed strings that point into `input`).
+pub fn deinitViewTable(tbl: *TableView, gpa: std.mem.Allocator, input: []const u8) void {
+    view_mod.deinitViewTable(tbl, gpa, input);
+}
+
+/// Deep-copy a view subtree into an owned Value tree.
+pub fn cloneValue(gpa: std.mem.Allocator, view: ValueView, input: []const u8) std.mem.Allocator.Error!Value {
+    return view_mod.cloneValue(gpa, view, input);
+}
+
+/// Serialize a ValueView tree to TOML text. Internally clones to Value.
+pub fn writeTomlView(
+    view: ValueView,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: std.mem.Allocator,
+    input: []const u8,
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    const val = try cloneValue(gpa, view, input);
+    defer switch (val) {
+        .table => |tbl| {
+            deinit(tbl, gpa);
+        },
+        else => parser_mod.deinitValue(val, gpa),
+    };
+    try writeTomlOpts(val, w, opts, gpa);
+}
+
+// ─── Output profiles ────────────────────────────────────────────────────────────
+
+pub const OutputProfile = hints_mod.OutputProfile;
+
+/// Serialize `value` as TOML with a named profile.
+///
+/// Profiles set multiple `WriteOptions` at once and optionally
+/// consume `hints` for string style and comment fidelity.
+pub fn writeTomlWithProfile(
+    value: Value,
+    w: *std.Io.Writer,
+    profile: OutputProfile,
+    hints: ?*FormatHints,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || std.mem.Allocator.Error)!void {
+    return output_toml.writeTomlWithProfile(value, w, profile, hints, gpa);
+}

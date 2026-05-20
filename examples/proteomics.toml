@@ -28,7 +28,7 @@
 
 title = "Quantitative Proteomics: Cellular Response to Thermal Stress"
 
-# Multi-line basic string — backslash line-ending trims whitespace
+# Multi-line basic string: backslash line-ending trims whitespace
 description = """\
 Multi-dimensional proteomics analysis investigating protein abundance \
 changes in a human embryonic kidney cell line subjected to gradual \
@@ -183,7 +183,7 @@ is_clinical  = true
   decoy_prefix = "DECOY_"
   contaminants = true
 
-  # Multi-line literal string — backslashes are literal, not escapes
+  # Multi-line literal string: backslashes are literal, not escapes
   description = '''
 RefProteome_Human: curated reference proteome for Homo sapiens.
 Reviewed entries only (Swiss-Prot tier), including canonical isoforms.
@@ -239,7 +239,7 @@ Path convention: /data/databases/<name>_<YYYY>_<MM>.fasta
   normalization      = "median"
 
   [quantification.channels]
-    # Inline tables — single-line form
+    # Inline tables: single-line form
     channel_126  = {name = "126C",  sample = "Control_37C_1", plex = 1}
     channel_127N = {name = "127N",  sample = "Control_37C_2", plex = 2}
     channel_127C = {name = "127C",  sample = "Control_37C_3", plex = 3}
