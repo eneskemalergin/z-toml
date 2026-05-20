@@ -2,20 +2,19 @@
 const std = @import("std");
 const types = @import("value.zig");
 const hints_mod = @import("output/hints.zig");
+const view_mod = @import("view.zig");
 
-pub const Table = types.Table;
-pub const Array = types.Array;
 pub const Value = types.Value;
+pub const Table = types.Table;
 pub const LocalDate = types.LocalDate;
 pub const LocalTime = types.LocalTime;
-pub const LocalDateTime = types.LocalDateTime;
-pub const OffsetDateTime = types.OffsetDateTime;
+
 
 const Allocator = std.mem.Allocator;
 
 pub const ParseError = error{ ParseFailed, OutOfMemory };
 
-// ─── Memory management ────────────────────────────────────────────────────────
+// ─── Memory management (owned Value tree) ─────────────────────────────────────
 
 /// Recursively free all memory owned by `value`.
 pub fn deinitValue(value: Value, gpa: Allocator) void {
@@ -60,16 +59,24 @@ const TableMeta = struct {
     key_kinds: std.StringHashMapUnmanaged(KeyKind),
 };
 
-const Parser = struct {
-    gpa: Allocator,
-    input: []const u8,
-    pos: usize,
-    line: u32,
-    line_start: usize,
-    root: *Table,
-    cur: *Table,
+fn ParserTy(comptime V: type) type {
+    const TableT = std.array_hash_map.String(V);
+    const ArrayT = std.ArrayList(V);
+
+    return struct {
+        const TableType = TableT;
+        const ArrayType = ArrayT;
+        const Self = @This();
+
+        gpa: Allocator,
+        input: []const u8,
+        pos: usize,
+        line: u32,
+        line_start: usize,
+        root: *TableType,
+        cur: *TableType,
     meta_arena: std.heap.ArenaAllocator,
-    table_metas: std.AutoHashMapUnmanaged(*Table, *TableMeta),
+    table_metas: std.AutoHashMapUnmanaged(*TableType, *TableMeta),
     err_info: ErrorInfo,
     hints: ?*hints_mod.FormatHints,
     table_path: std.ArrayListUnmanaged([]const u8),
@@ -77,15 +84,15 @@ const Parser = struct {
     pending_comment: ?[]const u8,
     trailing_path: std.ArrayListUnmanaged(u8),
 
-    fn init(gpa: Allocator, input: []const u8, hints: ?*hints_mod.FormatHints) Allocator.Error!Parser {
-        const root = try gpa.create(Table);
+    fn init(gpa: Allocator, input: []const u8, hints: ?*hints_mod.FormatHints) Allocator.Error!Self {
+        const root = try gpa.create(TableType);
         root.* = .empty;
         errdefer {
             root.deinit(gpa);
             gpa.destroy(root);
         }
 
-        var p = Parser{
+        var p = Self{
             .gpa = gpa,
             .input = input,
             .pos = 0,
@@ -107,13 +114,30 @@ const Parser = struct {
         return p;
     }
 
-    fn deinit(self: *Parser) void {
+    fn deinit(self: *Self) void {
         self.table_path.deinit(self.meta_arena.allocator());
         if (self.hints != null) self.trailing_path.deinit(self.gpa);
         self.meta_arena.deinit();
     }
 
-    fn setTablePath(self: *Parser, parts: [][]u8) Allocator.Error!void {
+    fn dropValue(self: *Self, value: V) void {
+        if (comptime V == types.Value) {
+            deinitValue(value, self.gpa);
+        } else {
+            var v = value;
+            view_mod.deinitViewValue(&v, self.gpa, self.input);
+        }
+    }
+
+    fn dropTable(self: *Self, tbl: *TableType) void {
+        if (comptime V == types.Value) {
+            deinitTable(tbl, self.gpa);
+        } else {
+            view_mod.deinitViewTable(tbl, self.gpa, self.input);
+        }
+    }
+
+    fn setTablePath(self: *Self, parts: [][]u8) Allocator.Error!void {
         const ma = self.meta_arena.allocator();
         self.table_path.clearRetainingCapacity();
         try self.table_path.ensureTotalCapacity(ma, parts.len);
@@ -123,7 +147,7 @@ const Parser = struct {
         }
     }
 
-    fn buildPath(self: *Parser, key_parts: [][]u8, out: *std.ArrayList(u8)) !void {
+    fn buildPath(self: *Self, key_parts: [][]u8, out: *std.ArrayList(u8)) !void {
         var first = true;
         for (self.table_path.items) |part| {
             if (!first) try out.append(self.gpa, '.');
@@ -137,14 +161,14 @@ const Parser = struct {
         }
     }
 
-    fn dupedPath(self: *Parser, key_parts: [][]u8) Allocator.Error![]u8 {
+    fn dupedPath(self: *Self, key_parts: [][]u8) Allocator.Error![]u8 {
         var path_buf: std.ArrayList(u8) = .empty;
         defer path_buf.deinit(self.gpa);
         try self.buildPath(key_parts, &path_buf);
         return path_buf.toOwnedSlice(self.gpa);
     }
 
-    fn recordStringHint(self: *Parser, style: hints_mod.StringStyle) !void {
+    fn recordStringHint(self: *Self, style: hints_mod.StringStyle) !void {
         const hints = self.hints orelse return;
         const styles = hints.string_styles orelse return;
         const key_parts = self.cur_key_parts orelse return;
@@ -154,7 +178,7 @@ const Parser = struct {
         try styles.put(self.gpa, owned, style);
     }
 
-    fn recordCommentForKey(self: *Parser, text: []const u8, key_parts: [][]u8) !void {
+    fn recordCommentForKey(self: *Self, text: []const u8, key_parts: [][]u8) !void {
         const hints = self.hints orelse return;
         const comments = hints.comments orelse return;
 
@@ -163,7 +187,7 @@ const Parser = struct {
         try comments.put(self.gpa, owned, text);
     }
 
-    fn createMeta(self: *Parser, tbl: *Table, kind: TableKind) Allocator.Error!*TableMeta {
+    fn createMeta(self: *Self, tbl: *TableType, kind: TableKind) Allocator.Error!*TableMeta {
         const ma = self.meta_arena.allocator();
         const m = try ma.create(TableMeta);
         m.* = .{ .kind = kind, .key_kinds = .empty };
@@ -171,11 +195,11 @@ const Parser = struct {
         return m;
     }
 
-    fn getMeta(self: *Parser, tbl: *Table) *TableMeta {
+    fn getMeta(self: *Self, tbl: *TableType) *TableMeta {
         return self.table_metas.get(tbl).?;
     }
 
-    fn fail(self: *Parser, comptime fmt: []const u8, args: anytype) ParseError {
+    fn fail(self: *Self, comptime fmt: []const u8, args: anytype) ParseError {
         self.err_info.line = self.line;
         self.err_info.col = @intCast(if (self.pos >= self.line_start) self.pos - self.line_start + 1 else 1);
         const msg = std.fmt.bufPrint(&self.err_info._buf, fmt, args) catch blk: {
@@ -187,18 +211,18 @@ const Parser = struct {
         return error.ParseFailed;
     }
 
-    inline fn peek(self: *const Parser) ?u8 {
+    inline fn peek(self: *const Self) ?u8 {
         if (self.pos >= self.input.len) return null;
         return self.input[self.pos];
     }
 
-    inline fn peekAt(self: *const Parser, offset: usize) ?u8 {
+    inline fn peekAt(self: *const Self, offset: usize) ?u8 {
         const i = self.pos + offset;
         if (i >= self.input.len) return null;
         return self.input[i];
     }
 
-    inline fn advance(self: *Parser) void {
+    inline fn advance(self: *Self) void {
         if (self.pos < self.input.len) {
             if (self.input[self.pos] == '\n') {
                 self.line += 1;
@@ -208,7 +232,7 @@ const Parser = struct {
         }
     }
 
-    inline fn eat(self: *Parser, ch: u8) bool {
+    inline fn eat(self: *Self, ch: u8) bool {
         if (self.peek() == ch) {
             self.advance();
             return true;
@@ -216,17 +240,17 @@ const Parser = struct {
         return false;
     }
 
-    fn expect(self: *Parser, ch: u8) ParseError!void {
+    fn expect(self: *Self, ch: u8) ParseError!void {
         if (!self.eat(ch)) return self.fail("expected '{c}', found '{?c}'", .{ ch, self.peek() });
     }
 
-    fn skipInlineWs(self: *Parser) void {
+    fn skipInlineWs(self: *Self) void {
         while (self.peek()) |c| {
             if (c == ' ' or c == '\t') self.advance() else break;
         }
     }
 
-    fn skipTrivia(self: *Parser) ParseError!void {
+    fn skipTrivia(self: *Self) ParseError!void {
         while (self.peek()) |c| switch (c) {
             ' ', '\t', '\n' => self.advance(),
             '\r' => if (self.peekAt(1) == '\n') {
@@ -238,7 +262,7 @@ const Parser = struct {
         };
     }
 
-    fn skipComment(self: *Parser) ParseError!void {
+    fn skipComment(self: *Self) ParseError!void {
         self.advance();
         const start = self.pos;
         while (self.peek()) |c| {
@@ -262,7 +286,7 @@ const Parser = struct {
         }
     }
 
-    fn skipToEOL(self: *Parser) ParseError!void {
+    fn skipToEOL(self: *Self) ParseError!void {
         while (self.peek()) |c| {
             if (c == '\n') {
                 self.advance();
@@ -278,7 +302,7 @@ const Parser = struct {
         }
     }
 
-    inline fn isEOL(self: *const Parser) bool {
+    inline fn isEOL(self: *const Self) bool {
         const c = self.peek() orelse return true;
         return switch (c) {
             '\n' => true,
@@ -287,7 +311,7 @@ const Parser = struct {
         };
     }
 
-    fn eatNewline(self: *Parser) ParseError!void {
+    fn eatNewline(self: *Self) ParseError!void {
         if (self.peek()) |c| switch (c) {
             '\n' => self.advance(),
             '\r' => {
@@ -301,7 +325,7 @@ const Parser = struct {
 
     // ─── key parsing ─────────────────────────────────────────────────────────
 
-    fn parseKeyPart(self: *Parser) ParseError![]u8 {
+    fn parseKeyPart(self: *Self) ParseError![]u8 {
         return switch (self.peek() orelse 0) {
             '"' => self.parseBasicStringRaw(),
             '\'' => self.parseLiteralStringRaw(),
@@ -309,16 +333,16 @@ const Parser = struct {
         };
     }
 
-    fn parseBareKey(self: *Parser) ParseError![]u8 {
+    fn parseBareKey(self: *Self) ParseError![]u8 {
         const start = self.pos;
         while (self.peek()) |c| {
             if (std.ascii.isAlphanumeric(c) or c == '_' or c == '-') self.advance() else break;
         }
         if (self.pos == start) return self.fail("expected a key", .{});
-        return self.gpa.dupe(u8, self.input[start..self.pos]) catch error.OutOfMemory;
+        return try self.gpa.dupe(u8, self.input[start..self.pos]);
     }
 
-    fn parseDottedKey(self: *Parser) ParseError!std.ArrayList([]u8) {
+    fn parseDottedKey(self: *Self) ParseError!std.ArrayList([]u8) {
         var parts: std.ArrayList([]u8) = .empty;
         errdefer {
             for (parts.items) |p| self.gpa.free(p);
@@ -344,26 +368,20 @@ const Parser = struct {
 
     // ─── string parsing ───────────────────────────────────────────────────────
 
-    fn parseBasicStringRaw(self: *Parser) ParseError![]u8 {
+    fn parseBasicStringRaw(self: *Self) ParseError![]u8 {
         try self.expect('"');
-        // Fast path: scan for control chars, escape, or newline before `"`.
-        // Most strings lack escapes; avoids ArrayList + byte-by-byte append.
-        {
-            const start = self.pos;
-            var i: usize = 0;
-            while (true) {
-                const c = self.peekAt(i) orelse return self.fail("unterminated string", .{});
-                if (c == '"') {
-                    self.pos += i;
-                    try self.expect('"');
-                    return try self.gpa.dupe(u8, self.input[start .. self.pos - 1]);
-                }
-                // Escape, newline, or control char → fall back to slow path.
-                if (c == '\\' or c == '\r' or c == '\n' or (c < 0x20 and c != '\t') or c == 0x7F) break;
-                i += 1;
+        const start = self.pos;
+        var i: usize = 0;
+        while (true) {
+            const c = self.peekAt(i) orelse return self.fail("unterminated string", .{});
+            if (c == '"') {
+                self.pos += i;
+                try self.expect('"');
+                return try self.gpa.dupe(u8, self.input[start .. self.pos - 1]);
             }
+            if (c == '\\' or c == '\r' or c == '\n' or (c < 0x20 and c != '\t') or c == 0x7F) break;
+            i += 1;
         }
-        // Slow path: has escapes; pre-allocate capacity (output ≤ remaining input).
         var buf: std.ArrayList(u8) = .empty;
         errdefer buf.deinit(self.gpa);
         try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
@@ -372,7 +390,31 @@ const Parser = struct {
         return buf.toOwnedSlice(self.gpa) catch error.OutOfMemory;
     }
 
-    fn parseMLString(self: *Parser, comptime basic: bool) ParseError!Value {
+    /// ValueView-aware: returns borrowed `[]const u8` for fast path
+    /// (no allocation) when V is ValueView. Keys are always allocated.
+    fn parseViewString(self: *Self) ParseError![]const u8 {
+        try self.expect('"');
+        const start = self.pos;
+        var i: usize = 0;
+        while (true) {
+            const c = self.peekAt(i) orelse return self.fail("unterminated string", .{});
+            if (c == '"') {
+                self.pos += i;
+                try self.expect('"');
+                return self.input[start .. self.pos - 1];
+            }
+            if (c == '\\' or c == '\r' or c == '\n' or (c < 0x20 and c != '\t') or c == 0x7F) break;
+            i += 1;
+        }
+        var buf: std.ArrayList(u8) = .empty;
+        errdefer buf.deinit(self.gpa);
+        try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
+        try self.parseBasicStringContents(&buf);
+        try self.expect('"');
+        return buf.toOwnedSlice(self.gpa) catch error.OutOfMemory;
+    }
+
+    fn parseMLString(self: *Self, comptime basic: bool) ParseError!V {
         const delim: u8 = if (basic) '"' else '\'';
         try self.expect(delim);
         try self.expect(delim);
@@ -417,14 +459,14 @@ const Parser = struct {
         return .{ .string = try buf.toOwnedSlice(self.gpa) };
     }
 
-    fn parseMLBasicString(self: *Parser) ParseError!Value {
+    fn parseMLBasicString(self: *Self) ParseError!V {
         return self.parseMLString(true);
     }
-    fn parseMLLiteralString(self: *Parser) ParseError!Value {
+    fn parseMLLiteralString(self: *Self) ParseError!V {
         return self.parseMLString(false);
     }
 
-    fn parseBasicStringContents(self: *Parser, buf: *std.ArrayList(u8)) ParseError!void {
+    fn parseBasicStringContents(self: *Self, buf: *std.ArrayList(u8)) ParseError!void {
         while (true) {
             const c = self.peek() orelse return self.fail("unterminated string", .{});
             if (c == '"') return;
@@ -442,7 +484,7 @@ const Parser = struct {
         }
     }
 
-    fn processEscape(self: *Parser, buf: *std.ArrayList(u8), multiline: bool) ParseError!void {
+    fn processEscape(self: *Self, buf: *std.ArrayList(u8), multiline: bool) ParseError!void {
         const c = self.peek() orelse return self.fail("unterminated escape sequence", .{});
         switch (c) {
             'b' => {
@@ -513,7 +555,7 @@ const Parser = struct {
         }
     }
 
-    fn appendCodepoint(self: *Parser, buf: *std.ArrayList(u8), cp: u32) ParseError!void {
+    fn appendCodepoint(self: *Self, buf: *std.ArrayList(u8), cp: u32) ParseError!void {
         if (cp > 0x10FFFF or (cp >= 0xD800 and cp <= 0xDFFF))
             return self.fail("invalid unicode scalar U+{X:0>6}", .{cp});
         var tmp: [4]u8 = undefined;
@@ -522,7 +564,7 @@ const Parser = struct {
         try buf.appendSlice(self.gpa, tmp[0..len]);
     }
 
-    fn parseHexEscape(self: *Parser, digits: usize) ParseError!u32 {
+    fn parseHexEscape(self: *Self, digits: usize) ParseError!u32 {
         var val: u32 = 0;
         for (0..digits) |_| {
             const c = self.peek() orelse return self.fail("incomplete hex escape", .{});
@@ -538,7 +580,7 @@ const Parser = struct {
         return val;
     }
 
-    fn parseLiteralStringRaw(self: *Parser) ParseError![]u8 {
+    fn parseLiteralStringRaw(self: *Self) ParseError![]u8 {
         try self.expect('\'');
         const start = self.pos;
         while (true) {
@@ -553,9 +595,26 @@ const Parser = struct {
         return s;
     }
 
+    /// View-optimized: returns borrowed `[]const u8` for fast path
+    /// (literal strings have no escapes, so always fast).
+    fn parseViewLiteralString(self: *Self) ParseError![]const u8 {
+        try self.expect('\'');
+        const start = self.pos;
+        while (true) {
+            const c = self.peek() orelse return self.fail("unterminated literal string", .{});
+            if (c == '\'') break;
+            if (c == '\n' or c == '\r') return self.fail("newline in single-line literal string", .{});
+            if (c != '\t' and (c < 0x20 or c == 0x7F)) return self.fail("control character U+{X:0>4} not allowed in literal string", .{c});
+            self.advance();
+        }
+        const s = self.input[start..self.pos];
+        try self.expect('\'');
+        return s;
+    }
+
     // ─── value parsing ────────────────────────────────────────────────────────
 
-    fn parseValue(self: *Parser) ParseError!Value {
+    fn parseValue(self: *Self) ParseError!V {
         const c = self.peek() orelse return self.fail("expected a value", .{});
         return switch (c) {
             '"' => if (self.peekAt(1) == '"' and self.peekAt(2) == '"') blk: {
@@ -563,18 +622,30 @@ const Parser = struct {
                 try self.recordStringHint(.multiline_basic);
                 break :blk v;
             } else blk: {
-                const s = try self.parseBasicStringRaw();
-                try self.recordStringHint(.basic);
-                break :blk .{ .string = s };
+                if (comptime V == types.Value) {
+                    const s = try self.parseBasicStringRaw();
+                    try self.recordStringHint(.basic);
+                    break :blk .{ .string = s };
+                } else {
+                    const s = try self.parseViewString();
+                    try self.recordStringHint(.basic);
+                    break :blk .{ .string = s };
+                }
             },
             '\'' => if (self.peekAt(1) == '\'' and self.peekAt(2) == '\'') blk: {
                 const v = try self.parseMLLiteralString();
                 try self.recordStringHint(.multiline_literal);
                 break :blk v;
             } else blk: {
-                const s = try self.parseLiteralStringRaw();
-                try self.recordStringHint(.literal);
-                break :blk .{ .string = s };
+                if (comptime V == types.Value) {
+                    const s = try self.parseLiteralStringRaw();
+                    try self.recordStringHint(.literal);
+                    break :blk .{ .string = s };
+                } else {
+                    const s = try self.parseViewLiteralString();
+                    try self.recordStringHint(.literal);
+                    break :blk .{ .string = s };
+                }
             },
             't' => self.parseTrue(),
             'f' => self.parseFalse(),
@@ -586,7 +657,7 @@ const Parser = struct {
         };
     }
 
-    fn parseTrue(self: *Parser) ParseError!Value {
+    fn parseTrue(self: *Self) ParseError!V {
         if (self.input.len - self.pos >= 4 and std.mem.eql(u8, self.input[self.pos .. self.pos + 4], "true")) {
             self.pos += 4;
             return .{ .boolean = true };
@@ -594,7 +665,7 @@ const Parser = struct {
         return self.fail("expected 'true'", .{});
     }
 
-    fn parseFalse(self: *Parser) ParseError!Value {
+    fn parseFalse(self: *Self) ParseError!V {
         if (self.input.len - self.pos >= 5 and std.mem.eql(u8, self.input[self.pos .. self.pos + 5], "false")) {
             self.pos += 5;
             return .{ .boolean = false };
@@ -602,7 +673,7 @@ const Parser = struct {
         return self.fail("expected 'false'", .{});
     }
 
-    fn parseInfOrNan(self: *Parser) ParseError!Value {
+    fn parseInfOrNan(self: *Self) ParseError!V {
         const sign: f64 = if (self.peek() == '+') blk: {
             self.advance();
             break :blk 1.0;
@@ -622,7 +693,7 @@ const Parser = struct {
         return self.fail("expected 'inf' or 'nan'", .{});
     }
 
-    fn parseNumericOrDatetime(self: *Parser) ParseError!Value {
+    fn parseNumericOrDatetime(self: *Self) ParseError!V {
         const sign_offset: usize = if (self.peek() == '+' or self.peek() == '-') 1 else 0;
         if (sign_offset == 1) {
             const rest = self.input[self.pos + 1 ..];
@@ -640,7 +711,7 @@ const Parser = struct {
         return self.parseIntOrFloat();
     }
 
-    fn parseDatetimeOrTime(self: *Parser) ParseError!Value {
+    fn parseDatetimeOrTime(self: *Self) ParseError!V {
         if (isDigit(self.peek()) and isDigit(self.peekAt(1)) and
             self.peekAt(2) == ':' and self.peekAt(4) != '-')
         {
@@ -660,7 +731,7 @@ const Parser = struct {
         return .{ .local_date = date };
     }
 
-    fn parseLocalDate(self: *Parser) ParseError!LocalDate {
+    fn parseLocalDate(self: *Self) ParseError!LocalDate {
         const y = try self.parseNDigits(4);
         try self.expect('-');
         const mo = try self.parseNDigits(2);
@@ -672,7 +743,7 @@ const Parser = struct {
         return .{ .year = @intCast(y), .month = @intCast(mo), .day = @intCast(d) };
     }
 
-    fn parseLocalTime(self: *Parser) ParseError!LocalTime {
+    fn parseLocalTime(self: *Self) ParseError!LocalTime {
         const h = try self.parseNDigits(2);
         try self.expect(':');
         const m = try self.parseNDigits(2);
@@ -705,7 +776,7 @@ const Parser = struct {
         return .{ .hour = @intCast(h), .minute = @intCast(m), .second = @intCast(s), .nanosecond = ns };
     }
 
-    fn parseOffset(self: *Parser) ParseError!i16 {
+    fn parseOffset(self: *Self) ParseError!i16 {
         const c = self.peek() orelse return self.fail("expected offset", .{});
         if (c == 'Z' or c == 'z') {
             self.advance();
@@ -723,7 +794,7 @@ const Parser = struct {
 
     // ─── number parsing helpers ────────────────────────────────────────────────
 
-    fn parseNDigits(self: *Parser, n: usize) ParseError!u32 {
+    fn parseNDigits(self: *Self, n: usize) ParseError!u32 {
         var v: u32 = 0;
         for (0..n) |_| {
             const c = self.peek() orelse return self.fail("expected {d} digits", .{n});
@@ -734,7 +805,7 @@ const Parser = struct {
         return v;
     }
 
-    fn consumeDigitsWithUnderscores(self: *Parser) ParseError!usize {
+    fn consumeDigitsWithUnderscores(self: *Self) ParseError!usize {
         const start = self.pos;
         var saw_digit = false;
         var last_was_underscore = false;
@@ -759,7 +830,7 @@ const Parser = struct {
         return start;
     }
 
-    fn sanitizedNumber(self: *Parser, start: usize, end: usize, buf: []u8) ParseError![]const u8 {
+    fn sanitizedNumber(self: *Self, start: usize, end: usize, buf: []u8) ParseError![]const u8 {
         var len: usize = 0;
         for (self.input[start..end]) |c| {
             if (c == '_') continue;
@@ -770,7 +841,7 @@ const Parser = struct {
         return buf[0..len];
     }
 
-    fn parsePrefixedInt(self: *Parser, comptime base: u8, comptime prefix: []const u8) ParseError!Value {
+    fn parsePrefixedInt(self: *Self, comptime base: u8, comptime prefix: []const u8) ParseError!V {
         std.debug.assert(self.peek() == '0');
         std.debug.assert(self.peekAt(1) != null and self.peekAt(1).? == prefix[1]);
 
@@ -808,7 +879,7 @@ const Parser = struct {
         return .{ .integer = .{ .value = v, .base = int_base } };
     }
 
-    fn parseIntOrFloat(self: *Parser) ParseError!Value {
+    fn parseIntOrFloat(self: *Self) ParseError!V {
         const start = self.pos;
         const has_sign = self.peek() == '+' or self.peek() == '-';
         if (has_sign) self.advance();
@@ -864,12 +935,12 @@ const Parser = struct {
         }
     }
 
-    fn parseArray(self: *Parser) ParseError!Value {
+    fn parseArray(self: *Self) ParseError!V {
         try self.expect('[');
-        const arr = try self.gpa.create(Array);
+        const arr = try self.gpa.create(ArrayType);
         arr.* = .empty;
         errdefer {
-            for (arr.items) |item| deinitValue(item, self.gpa);
+            for (arr.items) |*item| self.dropValue(item.*);
             arr.deinit(self.gpa);
             self.gpa.destroy(arr);
         }
@@ -889,12 +960,12 @@ const Parser = struct {
         return .{ .array = arr };
     }
 
-    fn parseInlineTable(self: *Parser) ParseError!Value {
+    fn parseInlineTable(self: *Self) ParseError!V {
         try self.expect('{');
-        const tbl = try self.gpa.create(Table);
+        const tbl = try self.gpa.create(TableType);
         tbl.* = .empty;
         errdefer {
-            deinitTable(tbl, self.gpa);
+            self.dropTable(tbl);
             self.gpa.destroy(tbl);
         }
         _ = try self.createMeta(tbl, .inline_t);
@@ -910,7 +981,7 @@ const Parser = struct {
             try self.expect('=');
             self.skipInlineWs();
             const val = try self.parseValue();
-            errdefer deinitValue(val, self.gpa);
+        errdefer self.dropValue(val);
             try self.setNestedKey(tbl, key_parts.items, val, true);
             try self.skipTrivia();
             if (!self.eat(',')) {
@@ -925,7 +996,7 @@ const Parser = struct {
 
     // ─── nested key assignment ────────────────────────────────────────────────
 
-    fn setNestedKey(self: *Parser, base: *Table, parts: [][]u8, value: Value, inline_ctx: bool) ParseError!void {
+    fn setNestedKey(self: *Self, base: *TableType, parts: [][]u8, value: V, inline_ctx: bool) ParseError!void {
         std.debug.assert(parts.len > 0);
         const ma = self.meta_arena.allocator();
         var tbl = base;
@@ -941,7 +1012,7 @@ const Parser = struct {
                 // deinit of boolean = no-op; no errdefer needed).
                 gop.value_ptr.* = .{ .boolean = false };
                 gop.key_ptr.* = &.{};
-                const sub = try self.gpa.create(Table);
+                const sub = try self.gpa.create(TableType);
                 sub.* = .empty;
                 gop.value_ptr.* = .{ .table = sub };
                 const sub_meta = try self.createMeta(sub, .implicit);
@@ -1001,7 +1072,7 @@ const Parser = struct {
 
     // ─── table header parsing ─────────────────────────────────────────────────
 
-    fn parseTableHeader(self: *Parser) ParseError!void {
+    fn parseTableHeader(self: *Self) ParseError!void {
         try self.expect('[');
         self.skipInlineWs();
         var key_parts = try self.parseDottedKey();
@@ -1025,7 +1096,7 @@ const Parser = struct {
         try self.setTablePath(key_parts.items);
     }
 
-    fn parseAOTHeader(self: *Parser) ParseError!void {
+    fn parseAOTHeader(self: *Self) ParseError!void {
         try self.expect('[');
         try self.expect('[');
         self.skipInlineWs();
@@ -1055,11 +1126,11 @@ const Parser = struct {
     /// tables as needed. Shared by `navigateToHeaderTable` and `navigateToAOT`
     /// whose intermediate-segment logic is identical.
     fn navigateIntermediate(
-        self: *Parser,
-        start_tbl: *Table,
+        self: *Self,
+        start_tbl: *TableType,
         start_meta: *TableMeta,
         path: [][]u8,
-    ) ParseError!struct { tbl: *Table, meta: *TableMeta } {
+    ) ParseError!struct { tbl: *TableType, meta: *TableMeta } {
         const ma = self.meta_arena.allocator();
         var tbl = start_tbl;
         var meta = start_meta;
@@ -1068,7 +1139,7 @@ const Parser = struct {
             if (!gop.found_existing) {
                 gop.value_ptr.* = .{ .boolean = false };
                 gop.key_ptr.* = &.{};
-                const sub = try self.gpa.create(Table);
+                const sub = try self.gpa.create(TableType);
                 sub.* = .empty;
                 gop.value_ptr.* = .{ .table = sub };
                 _ = try self.createMeta(sub, .implicit);
@@ -1096,7 +1167,7 @@ const Parser = struct {
         return .{ .tbl = tbl, .meta = meta };
     }
 
-    fn navigateToHeaderTable(self: *Parser, start_tbl: *Table, path: [][]u8) ParseError!*Table {
+    fn navigateToHeaderTable(self: *Self, start_tbl: *TableType, path: [][]u8) ParseError!*TableType {
         std.debug.assert(path.len > 0);
         const ma = self.meta_arena.allocator();
 
@@ -1109,7 +1180,7 @@ const Parser = struct {
         if (!gop.found_existing) {
             gop.value_ptr.* = .{ .boolean = false };
             gop.key_ptr.* = &.{};
-            const sub = try self.gpa.create(Table);
+            const sub = try self.gpa.create(TableType);
             sub.* = .empty;
             gop.value_ptr.* = .{ .table = sub };
             _ = try self.createMeta(sub, .header);
@@ -1134,7 +1205,7 @@ const Parser = struct {
         }
     }
 
-    fn navigateToAOT(self: *Parser, start_tbl: *Table, path: [][]u8) ParseError!*Table {
+    fn navigateToAOT(self: *Self, start_tbl: *TableType, path: [][]u8) ParseError!*TableType {
         std.debug.assert(path.len > 0);
         const ma = self.meta_arena.allocator();
 
@@ -1147,7 +1218,7 @@ const Parser = struct {
         if (!gop.found_existing) {
             gop.value_ptr.* = .{ .boolean = false };
             gop.key_ptr.* = &.{};
-            const arr = try self.gpa.create(Array);
+            const arr = try self.gpa.create(ArrayType);
             arr.* = .empty;
             gop.value_ptr.* = .{ .array = arr };
             const key_copy = try self.gpa.dupe(u8, last);
@@ -1160,8 +1231,8 @@ const Parser = struct {
         return self.appendAOTElement(gop.value_ptr.*.array);
     }
 
-    fn appendAOTElement(self: *Parser, arr: *Array) ParseError!*Table {
-        const elem = try self.gpa.create(Table);
+    fn appendAOTElement(self: *Self, arr: *ArrayType) ParseError!*TableType {
+        const elem = try self.gpa.create(TableType);
         elem.* = .empty;
         errdefer {
             elem.deinit(self.gpa);
@@ -1172,7 +1243,7 @@ const Parser = struct {
         return elem;
     }
 
-    fn parseKeyVal(self: *Parser) ParseError!void {
+    fn parseKeyVal(self: *Self) ParseError!void {
         var key_parts = try self.parseDottedKey();
         defer {
             for (key_parts.items) |p| self.gpa.free(p);
@@ -1190,7 +1261,7 @@ const Parser = struct {
         self.cur_key_parts = key_parts.items;
         const val = try self.parseValue();
         self.cur_key_parts = null;
-        errdefer deinitValue(val, self.gpa);
+        errdefer self.dropValue(val);
         try self.setNestedKey(self.cur, key_parts.items, val, false);
 
         // Build trailing_path for trailing comment association
@@ -1203,7 +1274,7 @@ const Parser = struct {
         }
     }
 
-    fn parseDocument(self: *Parser) ParseError!void {
+    fn parseDocument(self: *Self) ParseError!void {
         if (!std.unicode.utf8ValidateSlice(self.input))
             return self.fail("document is not valid UTF-8", .{});
         while (true) {
@@ -1235,6 +1306,8 @@ const Parser = struct {
     }
 };
 
+} // fn ParserTy(V)
+
 inline fn isDigit(c: ?u8) bool {
     return if (c) |ch| ch >= '0' and ch <= '9' else false;
 }
@@ -1264,6 +1337,12 @@ fn daysInMonth(year: u32, month: u32) u32 {
 /// Parse `input` as TOML v1.1.0. Returns a heap-allocated root `*Table`
 /// on success. The caller owns all memory; free via `deinitTable(root, gpa)` + `gpa.destroy(root)`.
 /// On failure `err_info` (if non-null) is populated with line/col/message.
+/// Parser instance producing owned Value trees (current behavior).
+pub const ParserVal = ParserTy(types.Value);
+
+/// Parser instance producing borrowed ValueView trees (zero-copy).
+pub const ParserView = ParserTy(view_mod.ValueView);
+
 pub fn parseSlice(gpa: Allocator, input: []const u8, err_info: ?*ErrorInfo) ParseError!*Table {
     return parseSliceWithHints(gpa, input, err_info, null);
 }
@@ -1274,12 +1353,30 @@ pub fn parseSliceWithHints(
     err_info: ?*ErrorInfo,
     hints: ?*hints_mod.FormatHints,
 ) ParseError!*Table {
-    var parser = try Parser.init(gpa, input, hints);
+    var parser = try ParserVal.init(gpa, input, hints);
     defer parser.deinit();
     parser.parseDocument() catch |e| {
         if (err_info) |ei| ei.* = parser.err_info;
         deinitTable(parser.root, gpa);
         gpa.destroy(parser.root);
+        return e;
+    };
+    return parser.root;
+}
+
+/// Parse without allocating string copies.
+/// Output borrows from `input` — caller must keep `input` alive
+/// while the view tree is in use. Free with `view_mod.deinitViewTable`.
+pub fn parseSliceView(
+    gpa: Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+) ParseError!*view_mod.TableView {
+    var parser = try ParserView.init(gpa, input, null);
+    defer parser.deinit();
+    parser.parseDocument() catch |e| {
+        if (err_info) |ei| ei.* = parser.err_info;
+        view_mod.deinitViewTable(parser.root, gpa, input);
         return e;
     };
     return parser.root;
