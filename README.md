@@ -30,7 +30,8 @@
 - `writeToml` / `writeTomlOpts`: serialize back to TOML text
 - `writeTomlWithProfile`: profile-based output (compact, preserve, canonical, faithful)
 - `writeTomlView`: serialize a zero-copy view directly to TOML
-- `parseSliceWithHints`: capture string styles and comments for format-fidelity roundtrips
+- `parseSliceWithHints`: capture format-fidelity hints for faithful roundtrips and modified-tree output
+- `parseSliceWithSpans` / `parseSliceWithOptions`: capture rewrite-ready value, statement, and header spans on structured paths
 - `cloneValue`: deep-copy a zero-copy view into an owned tree
 - Validated against the [toml-lang/toml-test](https://github.com/toml-lang/toml-test) corpus (215 valid + 467 invalid files)
 - Clear error messages with line and column numbers
@@ -296,15 +297,121 @@ pub fn parseSliceWithHints(
 
 Same as `parseSlice` but records string styles and comments into `FormatHints` during parsing. Pass the collected hints to `writeTomlWithProfile` for format-fidelity output.
 
+### `parseSliceWithSpans`
+
+```zig
+pub fn parseSliceWithSpans(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    spans: ?*ParseSpans,
+) ParseError!*Table
+```
+
+Same as `parseSlice` but records rewrite-ready value spans, statement spans, and table/AOT header spans keyed by structured path segments.
+
+### `parseSliceWithOptions`
+
+```zig
+pub const ParseOptions = struct {
+    hints: ?*FormatHints = null,
+    spans: ?*ParseSpans = null,
+};
+
+pub fn parseSliceWithOptions(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    options: ParseOptions,
+) ParseError!*Table
+```
+
+Use this when you need both fidelity hints and span collection from a single parse.
+
 ### `FormatHints`
 
 ```zig
+pub const PathSegment = union(enum) {
+    key: []const u8,
+    index: usize,
+};
+
+pub const HintPath = struct {
+    segments: []const PathSegment,
+};
+
+pub const CommentAttachment = enum(u3) {
+    before_entry,
+    trailing_entry,
+    before_table,
+    trailing_table,
+    before_aot,
+    trailing_aot,
+};
+
+pub const CommentRecord = struct {
+    attachment: CommentAttachment,
+    text: []const u8,
+    raw: ?[]const u8 = null,
+};
+
+pub const CommentList = std.ArrayListUnmanaged(CommentRecord);
+pub const KeyStyleMap = HintMap(KeyStyle);
+pub const KeyLexemeMap = HintMap([]const u8);
+pub const ValueLexemeMap = HintMap([]const u8);
+pub const TableSyntaxMap = HintMap(TableSyntax);
+pub const CommentMap = HintMap(CommentList);
+
 pub const FormatHints = struct {
     string_styles: ?*HintMap(StringStyle) = null,
-    comments: ?*HintMap([]const u8) = null,
+    key_styles: ?*KeyStyleMap = null,
+    key_lexemes: ?*KeyLexemeMap = null,
+    value_lexemes: ?*ValueLexemeMap = null,
+    table_syntax: ?*TableSyntaxMap = null,
+    comments: ?*CommentMap = null,
+    document: ?*DocumentHints = null,
 };
+
 pub const StringStyle = enum(u2) { basic, literal, multiline_basic, multiline_literal };
-pub const HintMap = std.array_hash_map.String;
+pub const KeyStyle = enum(u2) { bare, literal, basic };
+pub const TableSyntax = enum(u3) { inline_compact, inline_spaced, header, aot, dotted };
+pub const LineEnding = enum(u1) { lf, crlf };
+
+pub const DocumentHints = struct {
+    has_bom: bool = false,
+    line_ending: LineEnding = .lf,
+    original_source: ?[]const u8 = null,
+};
+
+pub fn HintMap(comptime V: type) type { ... }
+```
+
+`FormatHints` now carries structured-path fidelity data for comments, string styles, key quoting, key lexemes, untouched float and datetime lexemes, table syntax, and document-level BOM and line-ending preservation.
+
+### `ParseSpans`
+
+```zig
+pub const ByteSpan = struct {
+    start: usize,
+    end: usize,
+};
+
+pub const EntrySpan = struct {
+    value: ByteSpan,
+    statement: ByteSpan,
+};
+
+pub const HeaderKind = enum(u1) { table, aot };
+
+pub const HeaderSpan = struct {
+    header: ByteSpan,
+    kind: HeaderKind,
+};
+
+pub const ParseSpans = struct {
+    entries: ?*EntrySpanMap = null,
+    headers: ?*HeaderSpanMap = null,
+};
 ```
 
 ### `OutputProfile`
@@ -315,12 +422,10 @@ pub const OutputProfile = enum { compact, preserve, canonical, faithful };
 
 Each profile maps to a set of `WriteOptions` plus optional hint consumption:
 
-| Profile     | sort_keys | prefer_headers | use_escape_e | Hints consumed                          |
-| ----------- | --------- | -------------- | ------------ | --------------------------------------- |
-| `compact`   | false     | false          | false        | none                                    |
-| `preserve`  | false     | true           | false        | string_styles, preserve_order           |
-| `canonical` | true      | true           | true         | none                                    |
-| `faithful`  | false     | true           | true         | string_styles, comments, preserve_order |
+- `compact`: `sort_keys = false`, `prefer_headers = false`, `use_escape_e = false`, consumes no hints.
+- `preserve`: `sort_keys = false`, `prefer_headers = true`, `use_escape_e = false`, consumes `string_styles` and `preserve_order` behavior.
+- `canonical`: `sort_keys = true`, `prefer_headers = true`, `use_escape_e = true`, consumes no hints.
+- `faithful`: `sort_keys = false`, `prefer_headers = true`, `use_escape_e = true`, consumes `string_styles`, `comments`, `key_styles`, `key_lexemes`, `value_lexemes`, `table_syntax`, and `document`.
 
 ### `writeTomlWithProfile`
 
@@ -334,7 +439,7 @@ pub fn writeTomlWithProfile(
 ) (std.Io.Writer.Error || std.mem.Allocator.Error)!void
 ```
 
-Serializes `value` as TOML using a named profile. When hints are provided, the writer preserves string styles (e.g. literal `'...'` strings) and emits comments.
+Serializes `value` as TOML using a named profile. When `.faithful` is paired with collected hints, the writer preserves string styles, attached comments, key and header lexemes, untouched float and datetime spellings on modified output, inline-table and dotted-table syntax intent, and document-level BOM and line-ending behavior. Unchanged parsed documents can be replayed byte-for-byte from the stored original source.
 
 ### `parseSliceView`
 

@@ -10,6 +10,7 @@ const types = @import("value.zig");
 const parser_mod = @import("parser.zig");
 const typed_mod = @import("static.zig");
 pub const temporal = @import("temporal.zig");
+const spans_mod = @import("span.zig");
 const json_output = @import("output/json.zig");
 const output_toml = @import("output/toml.zig");
 const hints_mod = @import("output/hints.zig");
@@ -30,7 +31,15 @@ pub const OffsetDateTime = types.OffsetDateTime;
 
 pub const ParseError = parser_mod.ParseError;
 pub const ErrorInfo = parser_mod.ErrorInfo;
+pub const ParseOptions = parser_mod.ParseOptions;
 pub const ParseIntoError = typed_mod.ParseIntoError;
+pub const ByteSpan = spans_mod.ByteSpan;
+pub const EntrySpan = spans_mod.EntrySpan;
+pub const HeaderKind = spans_mod.HeaderKind;
+pub const HeaderSpan = spans_mod.HeaderSpan;
+pub const EntrySpanMap = spans_mod.EntrySpanMap;
+pub const HeaderSpanMap = spans_mod.HeaderSpanMap;
+pub const ParseSpans = spans_mod.ParseSpans;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -120,6 +129,24 @@ pub fn parseSliceWithHints(
     hints: ?*FormatHints,
 ) ParseError!*Table {
     return parser_mod.parseSliceWithHints(gpa, input, err_info, hints);
+}
+
+pub fn parseSliceWithSpans(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    spans: ?*ParseSpans,
+) ParseError!*Table {
+    return parser_mod.parseSliceWithSpans(gpa, input, err_info, spans);
+}
+
+pub fn parseSliceWithOptions(
+    gpa: std.mem.Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    options: ParseOptions,
+) ParseError!*Table {
+    return parser_mod.parseSliceWithOptions(gpa, input, err_info, options);
 }
 
 // ─── Zero-copy view API ────────────────────────────────────────────────────────

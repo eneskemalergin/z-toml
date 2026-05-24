@@ -9,41 +9,20 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ### Added
 
-- `CommentAttachment`, `CommentRecord`, `CommentList`, and `CommentMap` types for attachment-aware format comment hints.
-- `PathSegment` and `HintPath` types for segment-based hint identity shared by parser capture and writer lookups.
-- `KeyStyle`, `KeyStyleMap`, `KeyLexemeMap`, `TableSyntax`, `TableSyntaxMap`, `LineEnding`, and `DocumentHints` types for lexical faithful-output preservation.
-- Faithful comment regression tests covering multiple leading entry comments and same-line trailing entry comments on the same key.
-- Regression coverage for quoted-dot keys so `"a.b"` hint identity no longer collides with nested `a.b` paths.
-- Faithful regression coverage for leading and trailing comments on table headers and array-of-tables headers.
-- Faithful regression coverage for multiline string styles and nested string-style hints inside arrays and inline tables.
-- Faithful regression coverage for key quote styles, inline-table syntax, CRLF line endings, and UTF-8 BOM preservation.
-- Fixture regressions covering exact faithful roundtrips for `test/valid/comment/everywhere.toml`, `test/valid/comment/noeol.toml`, and `test/valid/key/quoted-dots.toml`, plus a guard that mutated trees do not replay stale source.
-- Faithful regression coverage for modified trees preserving dotted-header origin, escaped key and header lexemes, and valid fallback escaping for basic quoted keys with control characters.
-- Faithful regression coverage for modified trees preserving attached comment spacing and repeated array-of-tables header comments from the real comment fixture.
-- `ValueLexemeMap` fidelity hints and modified-tree faithful regressions for untouched float and datetime lexeme preservation.
-- Regression coverage ensuring internal comment trivia inside values does not leak into attached-comment output and duplicate later keys.
+- Structured fidelity and span APIs for v0.4.0 work, including `PathSegment`, `HintPath`, attachment-aware comment records, expanded `FormatHints`, and opt-in parser span collection through `ParseSpans`, `parseSliceWithSpans`, and `parseSliceWithOptions`.
+- Broader regression coverage for faithful output, modified-tree fidelity, and parser span capture across comments, multiline strings, quoted-dot keys, escaped keys and headers, inline tables, CRLF and BOM handling, floats and datetimes, and indexed array-of-tables paths.
 
 ### Changed
 
-- `FormatHints.comments` now stores ordered comment records instead of a single comment string per path.
-- `FormatHints` maps now use segment-based path keys instead of flattened dotted strings, and can optionally carry document-level line/BOM hints plus key-style and table-syntax hints.
-- `parseSliceWithHints` accumulates multiple leading comments and preserves trailing entry comments without overwriting earlier records.
-- `parseSliceWithHints` and `writeTomlWithProfile(..., .faithful, ...)` now distinguish quoted-dot keys from nested paths during hint lookup.
-- `writeTomlWithProfile(..., .faithful, ...)` now re-emits multiple leading entry comments and same-line trailing entry comments for the same path.
-- `writeTomlWithProfile(..., .faithful, ...)` now re-emits leading and same-line trailing comments for table headers and array-of-tables headers.
-- `parseSliceWithHints` now tracks nested string-style hint paths through arrays and inline tables.
-- `writeTomlWithProfile(..., .faithful, ...)` now preserves `.multiline_basic` and `.multiline_literal` styles and keeps hint lookups alive for nested array and inline-table values.
-- `parseSliceWithHints` now records quoted-key style, inline-table compact versus spaced syntax, UTF-8 BOM presence, and LF versus CRLF document line endings.
-- `writeTomlWithProfile(..., .faithful, ...)` now preserves basic-versus-literal key quoting, inline-table brace spacing, UTF-8 BOMs, and CRLF output when those lexical hints were present in the source.
-- `DocumentHints` now keeps an owned copy of the original TOML source, and `writeTomlWithProfile(..., .faithful, ...)` re-emits those exact bytes when the current value tree still matches the parsed document. Modified trees continue to use the synthesized faithful writer.
-- `parseSliceWithHints` now records exact raw key lexemes and absolute dotted-parent table syntax so modified-tree faithful output can preserve escaped key and header spelling without replaying stale source.
-- `writeTomlWithProfile(..., .faithful, ...)` now keeps dotted-table parents implicit on modified output and reuses preserved key lexemes for quoted keys and headers when those hints are available.
-- Fallback basic quoted key emission now escapes control characters so synthesized output stays valid even when no raw key lexeme hint exists.
-- `CommentRecord` now carries the raw rendered comment fragment for attached comments, and `writeTomlWithProfile(..., .faithful, ...)` replays that fragment so modified output preserves spacing before and after `#` for entry, table, and AOT comments.
-- Table and array-of-tables header comments are now keyed against absolute header paths instead of the previously active table context, which fixes misplaced root-level header comments after nested tables.
-- The faithful writer now consumes repeated comment records in parse order so repeated array-of-tables headers and repeated entry paths keep their own attached comments instead of reusing the first one.
-- `parseSliceWithHints` now records exact untouched float and datetime lexemes, and `writeTomlWithProfile(..., .faithful, ...)` reuses them on modified output when the current value still matches the parsed source.
-- The parser now ignores non-attached comment trivia encountered inside nested values, so out-of-scope array and inline-value comments no longer leak into attached-comment replay or duplicate later keys.
+- `FormatHints` has been redesigned around structured paths and ordered records instead of flattened dotted keys and one-comment-per-path storage, and now carries the lexical data needed for faithful output such as key styles, key lexemes, untouched float and datetime lexemes, table syntax, and document-level BOM and line-ending hints.
+- `writeTomlWithProfile(..., .faithful, ...)` is now substantially more faithful for both unchanged and modified documents: unchanged parsed input can be replayed byte-for-byte, while modified output preserves attached comments, multiline string styles, escaped keys and headers, dotted-table origin, inline-table spacing intent, line endings, BOMs, and untouched float and datetime spellings when the relevant hints are available.
+- The owned parser now supports optional span capture on the same structured path model used by hints, including value spans, statement spans, and table or array-of-tables header spans, while keeping the default parse path on a dedicated no-span specialization.
+
+### Fixed
+
+- Quoted-dot keys no longer collide with nested dotted paths during hint lookup or faithful output.
+- Header comment attachment and repeated comment replay now stay on the correct absolute path and preserve parse order for repeated entries and array-of-tables headers.
+- Modified faithful output no longer normalizes away attached comment spacing, leaks internal comment trivia into attached-comment replay, or drops validity when fallback basic quoted key escaping is needed.
 
 ## [0.3.0] - 2026-05-20 - [Tagged]
 

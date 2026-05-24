@@ -170,6 +170,100 @@ test "comments" {
     try std.testing.expectEqualStrings("value", root.get("key").?.string);
 }
 
+test "parseSliceWithSpans: root entry spans include value and full statement" {
+    const gpa = std.testing.allocator;
+    const src = "title = \"TOML Example\"\n";
+
+    var entries: toml.EntrySpanMap = .empty;
+    var spans: toml.ParseSpans = .{ .entries = &entries };
+    defer spans.deinit(gpa);
+
+    const root = try toml.parseSliceWithSpans(gpa, src, null, &spans);
+    defer toml.deinit(root, gpa);
+
+    const path = toml.HintPath{ .segments = &[_]toml.PathSegment{.{ .key = "title" }} };
+    const span = entries.get(path).?;
+    try std.testing.expectEqualStrings("\"TOML Example\"", src[span.value.start..span.value.end]);
+    try std.testing.expectEqualStrings("title = \"TOML Example\"\n", src[span.statement.start..span.statement.end]);
+}
+
+test "parseSliceWithSpans: nested table header and multiline value spans" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\[owner]
+        \\bio = """
+        \\line one
+        \\line two"""
+    ;
+
+    var entries: toml.EntrySpanMap = .empty;
+    var headers: toml.HeaderSpanMap = .empty;
+    var spans: toml.ParseSpans = .{ .entries = &entries, .headers = &headers };
+    defer spans.deinit(gpa);
+
+    const root = try toml.parseSliceWithSpans(gpa, src, null, &spans);
+    defer toml.deinit(root, gpa);
+
+    const header_path = toml.HintPath{ .segments = &[_]toml.PathSegment{.{ .key = "owner" }} };
+    const header = headers.get(header_path).?;
+    try std.testing.expectEqual(toml.HeaderKind.table, header.kind);
+    try std.testing.expectEqualStrings("[owner]\n", src[header.header.start..header.header.end]);
+
+    const entry_path = toml.HintPath{ .segments = &[_]toml.PathSegment{ .{ .key = "owner" }, .{ .key = "bio" } } };
+    const entry = entries.get(entry_path).?;
+    try std.testing.expectEqualStrings("\"\"\"\nline one\nline two\"\"\"", src[entry.value.start..entry.value.end]);
+}
+
+test "parseSliceWithSpans: aot indices disambiguate headers and entries" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\[[products]]
+        \\name = "Hammer"
+        \\[[products]]
+        \\name = "Nail"
+    ;
+
+    var entries: toml.EntrySpanMap = .empty;
+    var headers: toml.HeaderSpanMap = .empty;
+    var spans: toml.ParseSpans = .{ .entries = &entries, .headers = &headers };
+    defer spans.deinit(gpa);
+
+    const root = try toml.parseSliceWithSpans(gpa, src, null, &spans);
+    defer toml.deinit(root, gpa);
+
+    const first_header_path = toml.HintPath{ .segments = &[_]toml.PathSegment{ .{ .key = "products" }, .{ .index = 0 } } };
+    const second_header_path = toml.HintPath{ .segments = &[_]toml.PathSegment{ .{ .key = "products" }, .{ .index = 1 } } };
+    try std.testing.expectEqual(toml.HeaderKind.aot, headers.get(first_header_path).?.kind);
+    try std.testing.expectEqual(toml.HeaderKind.aot, headers.get(second_header_path).?.kind);
+
+    const second_entry_path = toml.HintPath{ .segments = &[_]toml.PathSegment{ .{ .key = "products" }, .{ .index = 1 }, .{ .key = "name" } } };
+    const second_entry = entries.get(second_entry_path).?;
+    try std.testing.expectEqualStrings("\"Nail\"", src[second_entry.value.start..second_entry.value.end]);
+}
+
+test "parseSliceWithOptions: spans compose with hints for inline tables in arrays" {
+    const gpa = std.testing.allocator;
+    const src = "items = [1, { \"x.y\" = 2 }]\n";
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var entries: toml.EntrySpanMap = .empty;
+    var hints: toml.FormatHints = .{ .key_styles = &key_styles };
+    defer hints.deinit(gpa);
+    var spans: toml.ParseSpans = .{ .entries = &entries };
+    defer spans.deinit(gpa);
+
+    const root = try toml.parseSliceWithOptions(gpa, src, null, .{ .hints = &hints, .spans = &spans });
+    defer toml.deinit(root, gpa);
+
+    const span_path = toml.HintPath{ .segments = &[_]toml.PathSegment{ .{ .key = "items" }, .{ .index = 1 }, .{ .key = "x.y" } } };
+    const span = entries.get(span_path).?;
+    try std.testing.expectEqualStrings("2", src[span.value.start..span.value.end]);
+    try std.testing.expectEqualStrings("\"x.y\" = 2", src[span.statement.start..span.statement.end]);
+
+    const style = key_styles.get(span_path).?;
+    try std.testing.expectEqual(toml.KeyStyle.basic, style);
+}
+
 test "multi-line basic string" {
     const gpa = std.testing.allocator;
     const src =

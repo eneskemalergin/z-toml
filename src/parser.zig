@@ -2,6 +2,7 @@
 const std = @import("std");
 const types = @import("value.zig");
 const hints_mod = @import("output/hints.zig");
+const spans_mod = @import("span.zig");
 const view_mod = @import("view.zig");
 
 pub const Value = types.Value;
@@ -58,14 +59,24 @@ const TableMeta = struct {
     key_kinds: std.StringHashMapUnmanaged(KeyKind),
 };
 
-fn ParserTy(comptime V: type) type {
+const ParseConfig = struct {
+    track_spans: bool = false,
+};
+
+fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
     const TableT = std.array_hash_map.String(V);
     const ArrayT = std.ArrayList(V);
+    const track_spans = config.track_spans;
 
     return struct {
         const TableType = TableT;
         const ArrayType = ArrayT;
         const Self = @This();
+        const SpanHandle = if (track_spans) ?*spans_mod.ParseSpans else void;
+        const SpanPathList = if (track_spans) std.ArrayListUnmanaged(hints_mod.PathSegment) else void;
+        const PendingSpanPath = if (track_spans) ?hints_mod.HintPath else void;
+        const PendingValueSpan = if (track_spans) ?spans_mod.ByteSpan else void;
+        const PendingStatementStart = if (track_spans) ?usize else void;
         const ParsedKeyPath = struct {
             parts: std.ArrayList([]u8),
             styles: std.ArrayList(hints_mod.KeyStyle),
@@ -78,6 +89,10 @@ fn ParserTy(comptime V: type) type {
                 self.styles.deinit(gpa);
                 self.raw_parts.deinit(gpa);
             }
+        };
+        const AOTElementResult = struct {
+            tbl: *TableType,
+            index: usize,
         };
 
         const PendingComment = struct {
@@ -96,12 +111,23 @@ fn ParserTy(comptime V: type) type {
         table_metas: std.AutoHashMapUnmanaged(*TableType, *TableMeta),
         err_info: ErrorInfo,
         hints: ?*hints_mod.FormatHints,
+        spans: SpanHandle,
         table_path: std.ArrayListUnmanaged([]const u8),
+        span_table_path: SpanPathList,
         current_value_path: std.ArrayListUnmanaged(hints_mod.PathSegment),
+        current_span_path: SpanPathList,
         pending_comments: std.ArrayListUnmanaged(PendingComment),
         trailing_path: ?hints_mod.HintPath,
+        pending_entry_span_path: PendingSpanPath,
+        pending_entry_value_span: PendingValueSpan,
+        pending_entry_statement_start: PendingStatementStart,
 
-        fn init(gpa: Allocator, input: []const u8, hints: ?*hints_mod.FormatHints) Allocator.Error!Self {
+        fn init(
+            gpa: Allocator,
+            input: []const u8,
+            hints: ?*hints_mod.FormatHints,
+            spans: ?*spans_mod.ParseSpans,
+        ) Allocator.Error!Self {
             const root = try gpa.create(TableType);
             root.* = .empty;
             errdefer {
@@ -121,10 +147,16 @@ fn ParserTy(comptime V: type) type {
                 .table_metas = .empty,
                 .err_info = .{},
                 .hints = hints,
+                .spans = if (track_spans) spans else {},
                 .table_path = .empty,
+                .span_table_path = if (track_spans) .empty else {},
                 .current_value_path = .empty,
+                .current_span_path = if (track_spans) .empty else {},
                 .pending_comments = .empty,
                 .trailing_path = null,
+                .pending_entry_span_path = if (track_spans) null else {},
+                .pending_entry_value_span = if (track_spans) null else {},
+                .pending_entry_statement_start = if (track_spans) null else {},
             };
             errdefer p.meta_arena.deinit();
             if (hints) |h| if (h.document) |document| {
@@ -148,6 +180,11 @@ fn ParserTy(comptime V: type) type {
             self.current_value_path.deinit(self.gpa);
             self.pending_comments.deinit(self.gpa);
             if (self.trailing_path) |*path| path.deinit(self.gpa);
+            if (track_spans) {
+                self.span_table_path.deinit(self.meta_arena.allocator());
+                self.current_span_path.deinit(self.gpa);
+                if (self.pending_entry_span_path) |*path| path.deinit(self.gpa);
+            }
             self.meta_arena.deinit();
         }
 
@@ -176,6 +213,29 @@ fn ParserTy(comptime V: type) type {
                 const duped = try ma.dupe(u8, part);
                 self.table_path.appendAssumeCapacity(duped);
             }
+        }
+
+        fn setSpanTablePath(self: *Self, parts: [][]u8) Allocator.Error!void {
+            if (!track_spans) return;
+            const ma = self.meta_arena.allocator();
+            self.span_table_path.clearRetainingCapacity();
+            try self.span_table_path.ensureTotalCapacity(ma, parts.len);
+            for (parts) |part| {
+                const duped = try ma.dupe(u8, part);
+                self.span_table_path.appendAssumeCapacity(.{ .key = duped });
+            }
+        }
+
+        fn setAOTSpanTablePath(self: *Self, parts: [][]u8, index: usize) Allocator.Error!void {
+            if (!track_spans) return;
+            const ma = self.meta_arena.allocator();
+            self.span_table_path.clearRetainingCapacity();
+            try self.span_table_path.ensureTotalCapacity(ma, parts.len + 1);
+            for (parts) |part| {
+                const duped = try ma.dupe(u8, part);
+                self.span_table_path.appendAssumeCapacity(.{ .key = duped });
+            }
+            self.span_table_path.appendAssumeCapacity(.{ .index = index });
         }
 
         fn buildPath(self: *Self, key_parts: [][]u8, out: *std.ArrayList(hints_mod.PathSegment)) !void {
@@ -212,6 +272,18 @@ fn ParserTy(comptime V: type) type {
             }
         }
 
+        fn setCurrentSpanPath(self: *Self, key_parts: [][]u8) !void {
+            if (!track_spans) return;
+            self.current_span_path.clearRetainingCapacity();
+            try self.current_span_path.ensureTotalCapacity(self.gpa, self.span_table_path.items.len + key_parts.len);
+            for (self.span_table_path.items) |segment| {
+                self.current_span_path.appendAssumeCapacity(segment);
+            }
+            for (key_parts) |part| {
+                self.current_span_path.appendAssumeCapacity(.{ .key = part });
+            }
+        }
+
         fn pushCurrentValueKeys(self: *Self, parts: [][]u8) !usize {
             const base_len = self.current_value_path.items.len;
             try self.current_value_path.ensureTotalCapacity(self.gpa, base_len + parts.len);
@@ -228,8 +300,111 @@ fn ParserTy(comptime V: type) type {
             return base_len;
         }
 
+        fn pushCurrentSpanKeys(self: *Self, parts: [][]u8) !usize {
+            if (!track_spans) return 0;
+            const base_len = self.current_span_path.items.len;
+            try self.current_span_path.ensureTotalCapacity(self.gpa, base_len + parts.len);
+            for (parts) |part| {
+                self.current_span_path.appendAssumeCapacity(.{ .key = part });
+            }
+            return base_len;
+        }
+
+        fn pushCurrentSpanIndex(self: *Self, index: usize) !usize {
+            if (!track_spans) return 0;
+            const base_len = self.current_span_path.items.len;
+            try self.current_span_path.ensureTotalCapacity(self.gpa, base_len + 1);
+            self.current_span_path.appendAssumeCapacity(.{ .index = index });
+            return base_len;
+        }
+
         fn restoreCurrentValuePath(self: *Self, len: usize) void {
             self.current_value_path.items.len = len;
+        }
+
+        fn restoreCurrentSpanPath(self: *Self, len: usize) void {
+            if (!track_spans) return;
+            self.current_span_path.items.len = len;
+        }
+
+        fn clearCurrentSpanPath(self: *Self) void {
+            if (!track_spans) return;
+            self.current_span_path.clearRetainingCapacity();
+        }
+
+        fn recordEntrySpanByPath(self: *Self, path: hints_mod.HintPath, span: spans_mod.EntrySpan) !void {
+            if (!track_spans) return;
+            const spans = self.spans orelse return;
+            const entries = spans.entries orelse return;
+
+            if (entries.getPtr(path)) |existing| {
+                existing.* = span;
+                return;
+            }
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+            try entries.put(self.gpa, owned, span);
+        }
+
+        fn recordHeaderSpanByPath(self: *Self, path: hints_mod.HintPath, span: spans_mod.HeaderSpan) !void {
+            if (!track_spans) return;
+            const spans = self.spans orelse return;
+            const headers = spans.headers orelse return;
+
+            if (headers.getPtr(path)) |existing| {
+                existing.* = span;
+                return;
+            }
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+            try headers.put(self.gpa, owned, span);
+        }
+
+        fn stagePendingEntrySpan(self: *Self, statement_start: usize, value_span: spans_mod.ByteSpan) !void {
+            if (!track_spans) return;
+            _ = self.spans orelse return;
+            if (self.current_span_path.items.len == 0) return;
+            if (self.pending_entry_span_path) |*path| path.deinit(self.gpa);
+            const path = hints_mod.HintPath{ .segments = self.current_span_path.items };
+            self.pending_entry_span_path = try path.clone(self.gpa);
+            self.pending_entry_value_span = value_span;
+            self.pending_entry_statement_start = statement_start;
+        }
+
+        fn finalizePendingEntrySpan(self: *Self, statement_end: usize) !void {
+            if (!track_spans) return;
+            const path = self.pending_entry_span_path orelse return;
+            const value_span = self.pending_entry_value_span orelse return;
+            const statement_start = self.pending_entry_statement_start orelse return;
+            try self.recordEntrySpanByPath(path, .{
+                .value = value_span,
+                .statement = .{ .start = statement_start, .end = statement_end },
+            });
+            var owned = path;
+            owned.deinit(self.gpa);
+            self.pending_entry_span_path = null;
+            self.pending_entry_value_span = null;
+            self.pending_entry_statement_start = null;
+        }
+
+        fn recordCurrentEntrySpan(self: *Self, statement_start: usize, value_span: spans_mod.ByteSpan) !void {
+            if (!track_spans) return;
+            if (self.current_span_path.items.len == 0) return;
+            try self.recordEntrySpanByPath(.{ .segments = self.current_span_path.items }, .{
+                .value = value_span,
+                .statement = .{ .start = statement_start, .end = value_span.end },
+            });
+        }
+
+        fn recordCurrentHeaderSpan(self: *Self, header_start: usize, header_end: usize, kind: spans_mod.HeaderKind) !void {
+            if (!track_spans) return;
+            if (self.span_table_path.items.len == 0) return;
+            try self.recordHeaderSpanByPath(.{ .segments = self.span_table_path.items }, .{
+                .header = .{ .start = header_start, .end = header_end },
+                .kind = kind,
+            });
         }
 
         fn recordStringHint(self: *Self, style: hints_mod.StringStyle) !void {
@@ -1413,9 +1588,12 @@ fn ParserTy(comptime V: type) type {
             while (self.peek() != ']') {
                 if (self.peek() == null) return self.fail("unterminated array", .{});
                 const path_len = try self.pushCurrentValueIndex(next_index);
+                const span_path_len = try self.pushCurrentSpanIndex(next_index);
                 errdefer self.restoreCurrentValuePath(path_len);
+                errdefer self.restoreCurrentSpanPath(span_path_len);
                 const v = try self.parseValue();
                 self.restoreCurrentValuePath(path_len);
+                self.restoreCurrentSpanPath(span_path_len);
                 try arr.append(self.gpa, v);
                 next_index += 1;
                 try self.skipTrivia();
@@ -1444,6 +1622,7 @@ fn ParserTy(comptime V: type) type {
             var padded_before_close = false;
             while (self.peek() != '}') {
                 if (self.peek() == null) return self.fail("unterminated inline table", .{});
+                const statement_start = self.pos;
                 var key_parts = try self.parseDottedKey();
                 defer key_parts.deinit(self.gpa);
                 try self.recordKeyStylesForCurrentValuePath(key_parts.parts.items, key_parts.styles.items);
@@ -1455,11 +1634,16 @@ fn ParserTy(comptime V: type) type {
                 try self.expect('=');
                 self.skipInlineWs();
                 const path_len = try self.pushCurrentValueKeys(key_parts.parts.items);
+                const span_path_len = try self.pushCurrentSpanKeys(key_parts.parts.items);
                 errdefer self.restoreCurrentValuePath(path_len);
+                errdefer self.restoreCurrentSpanPath(span_path_len);
+                const value_start = self.pos;
                 const val = try self.parseValue();
-                self.restoreCurrentValuePath(path_len);
                 errdefer self.dropValue(val);
                 try self.setNestedKey(tbl, key_parts.parts.items, val, true);
+                try self.recordCurrentEntrySpan(statement_start, .{ .start = value_start, .end = self.pos });
+                self.restoreCurrentValuePath(path_len);
+                self.restoreCurrentSpanPath(span_path_len);
                 const trivia_start = self.pos;
                 try self.skipTrivia();
                 if (self.peek() == '}' and self.pos != trivia_start) padded_before_close = true;
@@ -1553,6 +1737,7 @@ fn ParserTy(comptime V: type) type {
         // ─── table header parsing ─────────────────────────────────────────────────
 
         fn parseTableHeader(self: *Self) ParseError!void {
+            const header_start = self.pos;
             try self.expect('[');
             self.skipInlineWs();
             var key_parts = try self.parseDottedKey();
@@ -1578,9 +1763,12 @@ fn ParserTy(comptime V: type) type {
             try self.recordTableSyntaxForAbsoluteKeyParts(key_parts.parts.items, .header);
             self.cur = try self.navigateToHeaderTable(self.root, key_parts.parts.items);
             try self.setTablePath(key_parts.parts.items);
+            try self.setSpanTablePath(key_parts.parts.items);
+            try self.recordCurrentHeaderSpan(header_start, self.pos, .table);
         }
 
         fn parseAOTHeader(self: *Self) ParseError!void {
+            const header_start = self.pos;
             try self.expect('[');
             try self.expect('[');
             self.skipInlineWs();
@@ -1606,8 +1794,11 @@ fn ParserTy(comptime V: type) type {
             if (self.peek() == '#') try self.captureAttachedCommentAbsolute(key_parts.parts.items, .trailing_aot, trailing_comment_start);
             try self.skipToEOL();
             try self.recordTableSyntaxForAbsoluteKeyParts(key_parts.parts.items, .aot);
-            self.cur = try self.navigateToAOT(self.root, key_parts.parts.items);
+            const aot = try self.navigateToAOT(self.root, key_parts.parts.items);
+            self.cur = aot.tbl;
             try self.setTablePath(key_parts.parts.items);
+            try self.setAOTSpanTablePath(key_parts.parts.items, aot.index);
+            try self.recordCurrentHeaderSpan(header_start, self.pos, .aot);
         }
 
         // Navigate intermediate path segments (all but the last), creating implicit
@@ -1693,7 +1884,7 @@ fn ParserTy(comptime V: type) type {
             }
         }
 
-        fn navigateToAOT(self: *Self, start_tbl: *TableType, path: [][]u8) ParseError!*TableType {
+        fn navigateToAOT(self: *Self, start_tbl: *TableType, path: [][]u8) ParseError!AOTElementResult {
             std.debug.assert(path.len > 0);
             const ma = self.meta_arena.allocator();
 
@@ -1719,7 +1910,7 @@ fn ParserTy(comptime V: type) type {
             return self.appendAOTElement(gop.value_ptr.*.array);
         }
 
-        fn appendAOTElement(self: *Self, arr: *ArrayType) ParseError!*TableType {
+        fn appendAOTElement(self: *Self, arr: *ArrayType) ParseError!AOTElementResult {
             const elem = try self.gpa.create(TableType);
             elem.* = .empty;
             errdefer {
@@ -1728,10 +1919,11 @@ fn ParserTy(comptime V: type) type {
             }
             _ = try self.createMeta(elem, .header);
             arr.append(self.gpa, .{ .table = elem }) catch return error.OutOfMemory;
-            return elem;
+            return .{ .tbl = elem, .index = arr.items.len - 1 };
         }
 
         fn parseKeyVal(self: *Self) ParseError!void {
+            const statement_start = self.pos;
             var key_parts = try self.parseDottedKey();
             defer key_parts.deinit(self.gpa);
             try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
@@ -1748,10 +1940,14 @@ fn ParserTy(comptime V: type) type {
             try self.expect('=');
             self.skipInlineWs();
             try self.setCurrentValuePath(key_parts.parts.items);
+            try self.setCurrentSpanPath(key_parts.parts.items);
             defer self.current_value_path.clearRetainingCapacity();
+            defer self.clearCurrentSpanPath();
+            const value_start = self.pos;
             const val = try self.parseValue();
             errdefer self.dropValue(val);
             try self.setNestedKey(self.cur, key_parts.parts.items, val, false);
+            try self.stagePendingEntrySpan(statement_start, .{ .start = value_start, .end = self.pos });
 
             // Save path so the upcoming trailing comment (parsed after this function
             // returns) can be stored under the right key in FormatHints.
@@ -1778,16 +1974,21 @@ fn ParserTy(comptime V: type) type {
                         try self.parseKeyVal();
                         const trailing_comment_start = self.pos;
                         self.skipInlineWs();
-                        const next = self.peek() orelse break;
+                        const next = self.peek() orelse {
+                            try self.finalizePendingEntrySpan(self.pos);
+                            break;
+                        };
                         switch (next) {
                             '\n', '\r' => {
                                 if (self.trailing_path) |*path| path.deinit(self.gpa);
                                 self.trailing_path = null;
                                 try self.eatNewline();
+                                try self.finalizePendingEntrySpan(self.pos);
                             },
                             '#' => {
                                 try self.skipComment(trailing_comment_start);
                                 try self.eatNewline();
+                                try self.finalizePendingEntrySpan(self.pos);
                             },
                             else => return self.fail("expected newline after key/value pair, found '{c}'", .{self.peek().?}),
                         }
@@ -1828,22 +2029,32 @@ fn daysInMonth(year: u32, month: u32) u32 {
 /// on success. The caller owns all memory; free via `deinitTable(root, gpa)` + `gpa.destroy(root)`.
 /// On failure `err_info` (if non-null) is populated with line/col/message.
 /// Parser instance producing owned Value trees (current behavior).
-pub const ParserVal = ParserTy(types.Value);
+pub const ParserVal = ParserTy(types.Value, .{});
+pub const ParserValSpans = ParserTy(types.Value, .{ .track_spans = true });
 
 /// Parser instance producing borrowed ValueView trees (zero-copy).
-pub const ParserView = ParserTy(view_mod.ValueView);
+pub const ParserView = ParserTy(view_mod.ValueView, .{});
 
-pub fn parseSlice(gpa: Allocator, input: []const u8, err_info: ?*ErrorInfo) ParseError!*Table {
-    return parseSliceWithHints(gpa, input, err_info, null);
+comptime {
+    if (@sizeOf(ParserVal) >= @sizeOf(ParserValSpans)) {
+        @compileError("ParserVal must remain smaller than the span-enabled specialization");
+    }
 }
 
-pub fn parseSliceWithHints(
+pub const ParseOptions = struct {
+    hints: ?*hints_mod.FormatHints = null,
+    spans: ?*spans_mod.ParseSpans = null,
+};
+
+fn parseOwnedWithParser(
+    comptime ParserType: type,
     gpa: Allocator,
     input: []const u8,
     err_info: ?*ErrorInfo,
     hints: ?*hints_mod.FormatHints,
+    spans: ?*spans_mod.ParseSpans,
 ) ParseError!*Table {
-    var parser = try ParserVal.init(gpa, input, hints);
+    var parser = try ParserType.init(gpa, input, hints, spans);
     defer parser.deinit();
     parser.parseDocument() catch |e| {
         if (err_info) |ei| ei.* = parser.err_info;
@@ -1854,6 +2065,40 @@ pub fn parseSliceWithHints(
     return parser.root;
 }
 
+pub fn parseSlice(gpa: Allocator, input: []const u8, err_info: ?*ErrorInfo) ParseError!*Table {
+    return parseOwnedWithParser(ParserVal, gpa, input, err_info, null, null);
+}
+
+pub fn parseSliceWithOptions(
+    gpa: Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    options: ParseOptions,
+) ParseError!*Table {
+    if (options.spans != null) {
+        return parseOwnedWithParser(ParserValSpans, gpa, input, err_info, options.hints, options.spans);
+    }
+    return parseOwnedWithParser(ParserVal, gpa, input, err_info, options.hints, null);
+}
+
+pub fn parseSliceWithHints(
+    gpa: Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    hints: ?*hints_mod.FormatHints,
+) ParseError!*Table {
+    return parseOwnedWithParser(ParserVal, gpa, input, err_info, hints, null);
+}
+
+pub fn parseSliceWithSpans(
+    gpa: Allocator,
+    input: []const u8,
+    err_info: ?*ErrorInfo,
+    spans: ?*spans_mod.ParseSpans,
+) ParseError!*Table {
+    return parseOwnedWithParser(ParserValSpans, gpa, input, err_info, null, spans);
+}
+
 /// Parse without allocating string copies.
 /// Output borrows from `input` caller must keep `input` alive
 /// while the view tree is in use. Free with `view_mod.deinitViewTable`.
@@ -1862,7 +2107,7 @@ pub fn parseSliceView(
     input: []const u8,
     err_info: ?*ErrorInfo,
 ) ParseError!*view_mod.TableView {
-    var parser = try ParserView.init(gpa, input, null);
+    var parser = try ParserView.init(gpa, input, null, null);
     defer parser.deinit();
     parser.parseDocument() catch |e| {
         if (err_info) |ei| ei.* = parser.err_info;
