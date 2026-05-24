@@ -417,6 +417,38 @@ fn extendHintPath(
     return .{ .segments = buf[0 .. path.segments.len + 1] };
 }
 
+const InlineValueEntry = struct {
+    key: []const u8,
+    value: Value,
+};
+
+fn inlineValueEntryLessThan(_: void, a: InlineValueEntry, b: InlineValueEntry) bool {
+    return std.mem.order(u8, a.key, b.key) == .lt;
+}
+
+fn writeInlineEntry(
+    w: *std.Io.Writer,
+    key: []const u8,
+    value: Value,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    key_path: ?hints_mod.HintPath,
+    original_root: ?*const Table,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    if (key_path) |kp| {
+        var child_path_buf: [129]hints_mod.PathSegment = undefined;
+        const child_path = extendHintPath(&child_path_buf, kp, .{ .key = key });
+        try writeQuotedWithHints(w, key, hints, child_path);
+        try w.writeAll(" = ");
+        try writeValue(w, value, opts, hints, child_path, original_root, gpa);
+    } else {
+        try writeQuotedWithStyle(w, key, null);
+        try w.writeAll(" = ");
+        try writeValue(w, value, opts, hints, null, original_root, gpa);
+    }
+}
+
 fn writeValue(
     w: *std.Io.Writer,
     val: Value,
@@ -424,6 +456,7 @@ fn writeValue(
     hints: ?*hints_mod.FormatHints,
     key_path: ?hints_mod.HintPath,
     original_root: ?*const Table,
+    gpa: Allocator,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
     switch (val) {
         .float, .offset_datetime, .local_datetime, .local_date, .local_time => {
@@ -502,9 +535,9 @@ fn writeValue(
                 if (key_path) |kp| {
                     var child_path_buf: [129]hints_mod.PathSegment = undefined;
                     const child_path = extendHintPath(&child_path_buf, kp, .{ .index = i });
-                    try writeValue(w, item, opts, hints, child_path, original_root);
+                    try writeValue(w, item, opts, hints, child_path, original_root, gpa);
                 } else {
-                    try writeValue(w, item, opts, hints, null, original_root);
+                    try writeValue(w, item, opts, hints, null, original_root, gpa);
                 }
             }
             try w.writeByte(']');
@@ -518,20 +551,30 @@ fn writeValue(
             try w.writeByte('{');
             if (inline_spaced and tbl.count() > 0) try w.writeByte(' ');
             var first = true;
-            var it = tbl.iterator();
-            while (it.next()) |entry| {
-                if (!first) try w.writeAll(", ");
-                first = false;
-                if (key_path) |kp| {
-                    var child_path_buf: [129]hints_mod.PathSegment = undefined;
-                    const child_path = extendHintPath(&child_path_buf, kp, .{ .key = entry.key_ptr.* });
-                    try writeQuotedWithHints(w, entry.key_ptr.*, hints, child_path);
-                    try w.writeAll(" = ");
-                    try writeValue(w, entry.value_ptr.*, opts, hints, child_path, original_root);
-                } else {
-                    try writeQuotedWithStyle(w, entry.key_ptr.*, null);
-                    try w.writeAll(" = ");
-                    try writeValue(w, entry.value_ptr.*, opts, hints, null, original_root);
+
+            if (opts.sort_keys and tbl.count() > 1) {
+                const entries = try gpa.alloc(InlineValueEntry, tbl.count());
+                defer gpa.free(entries);
+
+                var it = tbl.iterator();
+                var index: usize = 0;
+                while (it.next()) |entry| {
+                    entries[index] = .{ .key = entry.key_ptr.*, .value = entry.value_ptr.* };
+                    index += 1;
+                }
+                std.sort.block(InlineValueEntry, entries, {}, inlineValueEntryLessThan);
+
+                for (entries) |entry| {
+                    if (!first) try w.writeAll(", ");
+                    first = false;
+                    try writeInlineEntry(w, entry.key, entry.value, opts, hints, key_path, original_root, gpa);
+                }
+            } else {
+                var it = tbl.iterator();
+                while (it.next()) |entry| {
+                    if (!first) try w.writeAll(", ");
+                    first = false;
+                    try writeInlineEntry(w, entry.key_ptr.*, entry.value_ptr.*, opts, hints, key_path, original_root, gpa);
                 }
             }
             if (inline_spaced and !first) try w.writeByte(' ');
@@ -781,7 +824,7 @@ fn writeKV(
     };
     try writeQuotedWithHints(w, key, hints, full_path);
     try w.writeAll(" = ");
-    try writeValue(w, val, opts, hints, full_path, original_root);
+    try writeValue(w, val, opts, hints, full_path, original_root, gpa);
     if (trailing_comment) |comment| {
         try writeTrailingComment(w, comment);
     }
@@ -891,7 +934,7 @@ fn writePreserveOrder(
                     try w.writeByte('.');
                     try writeQuotedWithHints(w, kv.key, hints, full_path);
                     try w.writeAll(" = ");
-                    try writeValue(w, kv.val, opts, hints, full_path, original_root);
+                    try writeValue(w, kv.val, opts, hints, full_path, original_root, gpa);
                     try writeNewline(w, hints);
                 } else {
                     try writeKV(w, kv.key, kv.val, opts, hints, path, comment_state, original_root, gpa);
@@ -965,7 +1008,96 @@ pub fn writeTomlOpts(
 ) (std.Io.Writer.Error || Allocator.Error)!void {
     switch (value) {
         .table => |tbl| try writeTable(w, tbl, &.{}, opts, null, null, null, gpa),
-        else => try writeValue(w, value, opts, null, null, null),
+        else => try writeValue(w, value, opts, null, null, null, gpa),
+    }
+    try w.flush();
+}
+
+pub fn writeTomlRewriteValueOpts(
+    value: Value,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    key_path: ?hints_mod.HintPath,
+    original_root: ?*const Table,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    try writeValue(w, value, opts, hints, key_path, original_root, gpa);
+    try w.flush();
+}
+
+/// Serialize `value` as a TOML value expression with custom `opts`.
+///
+/// `prefer_headers` has no effect here because value expressions cannot emit
+/// table headers. `gpa` is used when `opts.sort_keys` needs temporary storage.
+pub fn writeTomlValueOpts(
+    value: Value,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    return writeTomlRewriteValueOpts(value, w, opts, null, null, null, gpa);
+}
+
+/// Serialize `value` as a TOML value expression.
+///
+/// Tables are emitted as inline-table expressions so the output remains valid
+/// anywhere a TOML value can appear.
+pub fn writeTomlValue(
+    value: Value,
+    w: *std.Io.Writer,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    return writeTomlValueOpts(value, w, .{}, std.heap.page_allocator);
+}
+
+pub fn writeTomlPathValueOpts(
+    path: []const []const u8,
+    value: Value,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    std.debug.assert(path.len > 0);
+    if (path.len > 1) {
+        try writeDottedPrefix(w, @constCast(path[0 .. path.len - 1]), hints);
+        try w.writeByte('.');
+    }
+    try writeQuotedWithStyle(w, path[path.len - 1], null);
+    try w.writeAll(" = ");
+    try writeValue(w, value, opts, hints, null, null, gpa);
+    try writeNewline(w, hints);
+    try w.flush();
+}
+
+pub fn writeTomlTableFragmentOpts(
+    path: []const []const u8,
+    table: *Table,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    std.debug.assert(path.len > 0);
+    try writeHeaderWithComments(w, @constCast(path), false, hints, null, gpa);
+    try writeTableInner(w, table, @constCast(path), false, opts, hints, null, null, gpa);
+    try w.flush();
+}
+
+pub fn writeTomlArrayOfTablesFragmentOpts(
+    path: []const []const u8,
+    arr: *types.Array,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    std.debug.assert(path.len > 0);
+    for (arr.items, 0..) |item, index| {
+        std.debug.assert(item == .table);
+        if (index > 0) try writeNewline(w, hints);
+        try writeHeaderWithComments(w, @constCast(path), true, hints, null, gpa);
+        try writeTableInner(w, item.table, @constCast(path), false, opts, hints, null, null, gpa);
     }
     try w.flush();
 }
@@ -1009,7 +1141,7 @@ pub fn writeTomlWithProfile(
     };
     switch (value) {
         .table => |tbl| try writeTable(w, tbl, &.{}, opts, hints, active_comment_state, if (original_root) |root| root else null, gpa),
-        else => try writeValue(w, value, opts, hints, null, if (original_root) |root| root else null),
+        else => try writeValue(w, value, opts, hints, null, if (original_root) |root| root else null, gpa),
     }
     try w.flush();
 }

@@ -28,7 +28,11 @@
 - `parseSliceView`: zero-copy parse returning borrowed strings from the input buffer
 - `toJson`: serialize a parsed tree to JSON
 - `writeToml` / `writeTomlOpts`: serialize back to TOML text
+- `writeTomlValue` / `writeTomlValueOpts`: serialize a single TOML value expression, including inline-table output for table values
 - `writeTomlWithProfile`: profile-based output (compact, preserve, canonical, faithful)
+- `rewriteValueAtPath` / `rewriteValueAtPathOpts`: replace one existing value by structured path while preserving surrounding bytes
+- `setValueAtPath` / `setValueAtPathOpts`: create or replace one value by structured path
+- `rewriteValues`: apply multiple rewrite operations sequentially to one document
 - `writeTomlView`: serialize a zero-copy view directly to TOML
 - `parseSliceWithHints`: capture format-fidelity hints for faithful roundtrips and modified-tree output
 - `parseSliceWithSpans` / `parseSliceWithOptions`: capture rewrite-ready value, statement, and header spans on structured paths
@@ -273,6 +277,30 @@ var w = std.Io.Writer.fixed(&buf);
 try toml.writeTomlOpts(.{ .table = root }, &w, .{ .sort_keys = true }, gpa);
 ```
 
+### `writeTomlValue`
+
+```zig
+pub fn writeTomlValue(
+    value: Value,
+    w: *std.Io.Writer,
+) (std.Io.Writer.Error || Allocator.Error)!void
+```
+
+Serializes one `Value` as a TOML value expression. Table values are emitted as inline tables, so the result is valid anywhere a TOML value can appear.
+
+### `writeTomlValueOpts`
+
+```zig
+pub fn writeTomlValueOpts(
+    value: Value,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void
+```
+
+Same as `writeTomlValue` but applies `WriteOptions` to the emitted value expression. `prefer_headers` has no effect here because a value position cannot emit TOML table headers.
+
 ### `WriteOptions`
 
 ```zig
@@ -327,6 +355,96 @@ pub fn parseSliceWithOptions(
 ```
 
 Use this when you need both fidelity hints and span collection from a single parse.
+
+### `rewriteValueAtPath`
+
+```zig
+pub fn rewriteValueAtPath(
+    input: []const u8,
+    path: []const PathSegment,
+    new_value: Value,
+    w: *std.Io.Writer,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || RewriteError)!void
+```
+
+Rewrites one existing value in `input` by structured path and writes the result to `w`. Bytes outside the replaced value span are copied through unchanged.
+
+This includes table replacements. By default, replacements preserve the existing string or table style when the parsed hints can justify it. With `prefer_headers = true`, table and array-of-tables replacements can expand into header-based TOML fragments instead of staying inline.
+
+### `rewriteValueAtPathOpts`
+
+```zig
+pub fn rewriteValueAtPathOpts(
+    input: []const u8,
+    path: []const PathSegment,
+    new_value: Value,
+    w: *std.Io.Writer,
+    opts: WriteOptions,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || RewriteError)!void
+```
+
+Same rewrite operation, but the replacement value is serialized with caller-provided `WriteOptions`. This is useful when the replacement expression should use a specific escape style or sorted inline-table keys instead of the default emission.
+
+### `setValueAtPath`
+
+```zig
+pub fn setValueAtPath(
+    input: []const u8,
+    path: []const PathSegment,
+    new_value: Value,
+    w: *std.Io.Writer,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || RewriteError)!void
+```
+
+Creates or replaces one value by structured path. Missing keys can be materialized under the nearest valid table or array-of-tables element. Missing indices are rejected.
+
+### `setValueAtPathOpts`
+
+```zig
+pub fn setValueAtPathOpts(
+    input: []const u8,
+    path: []const PathSegment,
+    new_value: Value,
+    w: *std.Io.Writer,
+    options: RewriteOptions,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || RewriteError)!void
+```
+
+Same create-or-replace operation, but with `RewriteOptions` controlling replacement formatting and whether existing style hints should be reused when rewriting an existing entry.
+
+### `rewriteValues`
+
+```zig
+pub const RewriteOperation = struct {
+    path: []const PathSegment,
+    value: Value,
+};
+
+pub const RewriteMode = enum {
+    replace_only,
+    create_or_replace,
+};
+
+pub const RewriteOptions = struct {
+    mode: RewriteMode = .replace_only,
+    write: WriteOptions = .{},
+    preserve_existing_styles: bool = true,
+};
+
+pub fn rewriteValues(
+    input: []const u8,
+    operations: []const RewriteOperation,
+    w: *std.Io.Writer,
+    options: RewriteOptions,
+    gpa: std.mem.Allocator,
+) (std.Io.Writer.Error || RewriteError)!void
+```
+
+Applies multiple rewrite operations sequentially to one document. This is the Phase 6 batch surface. Later operations see the bytes produced by earlier ones.
 
 ### `FormatHints`
 

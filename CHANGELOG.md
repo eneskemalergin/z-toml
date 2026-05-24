@@ -11,12 +11,15 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 - Structured fidelity and span APIs for v0.4.0 work, including `PathSegment`, `HintPath`, attachment-aware comment records, expanded `FormatHints`, and opt-in parser span collection through `ParseSpans`, `parseSliceWithSpans`, and `parseSliceWithOptions`.
 - Broader regression coverage for faithful output, modified-tree fidelity, and parser span capture across comments, multiline strings, quoted-dot keys, escaped keys and headers, inline tables, CRLF and BOM handling, floats and datetimes, and indexed array-of-tables paths.
+- Rewrite-by-splice APIs for structured-path replacement, create-or-replace, and sequential batch rewriting through `rewriteValueAtPath`, `setValueAtPath`, and `rewriteValues`, including header-mode table and array-of-tables fragments when requested.
 
 ### Changed
 
 - `FormatHints` has been redesigned around structured paths and ordered records instead of flattened dotted keys and one-comment-per-path storage, and now carries the lexical data needed for faithful output such as key styles, key lexemes, untouched float and datetime lexemes, table syntax, and document-level BOM and line-ending hints.
 - `writeTomlWithProfile(..., .faithful, ...)` is now substantially more faithful for both unchanged and modified documents: unchanged parsed input can be replayed byte-for-byte, while modified output preserves attached comments, multiline string styles, escaped keys and headers, dotted-table origin, inline-table spacing intent, line endings, BOMs, and untouched float and datetime spellings when the relevant hints are available.
 - The owned parser now supports optional span capture on the same structured path model used by hints, including value spans, statement spans, and table or array-of-tables header spans, while keeping the default parse path on a dedicated no-span specialization.
+- The rewrite layer now uses statement and header spans as well as value spans: it can replace existing values, create missing keys, materialize nested paths under tables and indexed array-of-tables elements, and expand table rewrites into header-based TOML fragments without reserializing untouched bytes around the changed region.
+- Value-expression serialization now has opt-in `writeTomlValueOpts` and `writeTomlRewriteValueOpts` paths, so rewrite callers can control replacement formatting such as key sorting and escape style while still reusing existing string and table styles when the parsed hints justify it.
 
 ### Fixed
 

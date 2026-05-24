@@ -170,6 +170,361 @@ test "comments" {
     try std.testing.expectEqualStrings("value", root.get("key").?.string);
 }
 
+test "rewriteValueAtPath: rewrites root scalar and preserves surrounding bytes" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\title = "TOML Example"
+        \\count = 42
+    ;
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPath(
+        src,
+        &[_]toml.PathSegment{.{ .key = "title" }},
+        .{ .string = "Changed" },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "title = \"Changed\"\ncount = 42",
+        w.buffered(),
+    );
+}
+
+test "rewriteValueAtPath: rewrites nested value and keeps trailing comment" {
+    const gpa = std.testing.allocator;
+    const src = "[group]\nanswer = 42 # keep\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPath(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "group" }, .{ .key = "answer" } },
+        .{ .integer = .{ .value = 77 } },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("[group]\nanswer = 77 # keep\n", w.buffered());
+}
+
+test "rewriteValueAtPath: rewrites multiline string value by span" {
+    const gpa = std.testing.allocator;
+    const src = "note = \"\"\"\nline one\nline two\"\"\"\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPath(
+        src,
+        &[_]toml.PathSegment{.{ .key = "note" }},
+        .{ .string = "updated" },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("note = \"\"\"\nupdated\"\"\"\n", w.buffered());
+}
+
+test "rewriteValueAtPath: rewrites value to inline table expression" {
+    const gpa = std.testing.allocator;
+    const src = "cfg = 1 # keep\n";
+
+    const replacement = try gpa.create(toml.Table);
+    replacement.* = .empty;
+    defer toml.deinit(replacement, gpa);
+
+    try replacement.put(gpa, try gpa.dupe(u8, "enabled"), .{ .boolean = true });
+    try replacement.put(gpa, try gpa.dupe(u8, "port"), .{ .integer = .{ .value = 8080 } });
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPath(
+        src,
+        &[_]toml.PathSegment{.{ .key = "cfg" }},
+        .{ .table = replacement },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "cfg = {enabled = true, port = 8080} # keep\n",
+        w.buffered(),
+    );
+}
+
+test "rewriteValueAtPath: rewrites inline-table member by structured path" {
+    const gpa = std.testing.allocator;
+    const src = "cfg = { current = 1, mode = \"dev\" }\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPath(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "cfg" }, .{ .key = "current" } },
+        .{ .integer = .{ .value = 2 } },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "cfg = { current = 2, mode = \"dev\" }\n",
+        w.buffered(),
+    );
+}
+
+test "rewriteValueAtPathOpts: applies replacement write options" {
+    const gpa = std.testing.allocator;
+    const src = "cfg = 1\n";
+
+    const replacement = try gpa.create(toml.Table);
+    replacement.* = .empty;
+    defer toml.deinit(replacement, gpa);
+
+    try replacement.put(gpa, try gpa.dupe(u8, "z"), .{ .integer = .{ .value = 2 } });
+    try replacement.put(gpa, try gpa.dupe(u8, "a"), .{ .string = try gpa.dupe(u8, "x\x1By") });
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{.{ .key = "cfg" }},
+        .{ .table = replacement },
+        &w,
+        .{ .sort_keys = true, .use_escape_e = true },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "cfg = {a = \"x\\ey\", z = 2}\n",
+        w.buffered(),
+    );
+}
+
+test "rewriteValueAtPathOpts: table replacement can expand to headers" {
+    const gpa = std.testing.allocator;
+    const src = "cfg = 1\n[group]\nvalue = 2\n";
+
+    const replacement = try gpa.create(toml.Table);
+    replacement.* = .empty;
+    defer toml.deinit(replacement, gpa);
+
+    try replacement.put(gpa, try gpa.dupe(u8, "enabled"), .{ .boolean = true });
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{.{ .key = "cfg" }},
+        .{ .table = replacement },
+        &w,
+        .{ .prefer_headers = true },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "[cfg]\nenabled = true\n[group]\nvalue = 2\n",
+        w.buffered(),
+    );
+}
+
+test "setValueAtPath: inserts missing root key before first header" {
+    const gpa = std.testing.allocator;
+    const src = "[group]\nvalue = 1\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPath(
+        src,
+        &[_]toml.PathSegment{.{ .key = "answer" }},
+        .{ .integer = .{ .value = 42 } },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("answer = 42\n[group]\nvalue = 1\n", w.buffered());
+}
+
+test "setValueAtPath: inserts missing key before child table header" {
+    const gpa = std.testing.allocator;
+    const src = "[group]\n[group.child]\nx = 1\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPath(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "group" }, .{ .key = "answer" } },
+        .{ .integer = .{ .value = 42 } },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("[group]\nanswer = 42\n[group.child]\nx = 1\n", w.buffered());
+}
+
+test "setValueAtPath: inserts through implicit dotted parent" {
+    const gpa = std.testing.allocator;
+    const src = "a.b = 1\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPath(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "a" }, .{ .key = "c" } },
+        .{ .integer = .{ .value = 2 } },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("a.b = 1\na.c = 2\n", w.buffered());
+}
+
+test "setValueAtPathOpts: creates nested path with header syntax" {
+    const gpa = std.testing.allocator;
+    const src = "[group]\nname = \"demo\"\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "group" }, .{ .key = "child" }, .{ .key = "port" } },
+        .{ .integer = .{ .value = 80 } },
+        &w,
+        .{ .write = .{ .prefer_headers = true } },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("[group]\nname = \"demo\"\n[group.child]\nport = 80\n", w.buffered());
+}
+
+test "setValueAtPathOpts: creates child table under indexed aot element" {
+    const gpa = std.testing.allocator;
+    const src = "[[products]]\nname = \"Hammer\"\n[[products]]\nname = \"Nail\"\n";
+
+    const replacement = try gpa.create(toml.Table);
+    replacement.* = .empty;
+    defer toml.deinit(replacement, gpa);
+
+    try replacement.put(gpa, try gpa.dupe(u8, "sku"), .{ .string = try gpa.dupe(u8, "N-1") });
+
+    var out_buf: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "products" }, .{ .index = 1 }, .{ .key = "details" } },
+        .{ .table = replacement },
+        &w,
+        .{ .write = .{ .prefer_headers = true } },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "[[products]]\nname = \"Hammer\"\n[[products]]\nname = \"Nail\"\n[products.details]\nsku = \"N-1\"\n",
+        w.buffered(),
+    );
+}
+
+test "rewriteValues: applies operations sequentially" {
+    const gpa = std.testing.allocator;
+    const src = "[group]\nvalue = 1\n";
+
+    const operations = [_]toml.RewriteOperation{
+        .{ .path = &[_]toml.PathSegment{.{ .key = "answer" }}, .value = .{ .integer = .{ .value = 42 } } },
+        .{ .path = &[_]toml.PathSegment{ .{ .key = "group" }, .{ .key = "value" } }, .value = .{ .integer = .{ .value = 2 } } },
+        .{ .path = &[_]toml.PathSegment{ .{ .key = "group" }, .{ .key = "details" }, .{ .key = "port" } }, .value = .{ .integer = .{ .value = 8080 } } },
+    };
+
+    var out_buf: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValues(
+        src,
+        &operations,
+        &w,
+        .{ .mode = .create_or_replace, .write = .{ .prefer_headers = true } },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "answer = 42\n[group]\nvalue = 2\n[group.details]\nport = 8080\n",
+        w.buffered(),
+    );
+}
+
+test "setValueAtPath: scalar parent conflict returns PathConflict" {
+    const gpa = std.testing.allocator;
+    const src = "a = 1\n";
+
+    var out_buf: [128]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try std.testing.expectError(
+        error.PathConflict,
+        toml.setValueAtPath(
+            src,
+            &[_]toml.PathSegment{ .{ .key = "a" }, .{ .key = "b" } },
+            .{ .integer = .{ .value = 2 } },
+            &w,
+            gpa,
+        ),
+    );
+}
+
+test "setValueAtPath: missing indexed path returns UnsupportedRewritePath" {
+    const gpa = std.testing.allocator;
+    const src = "items = []\n";
+
+    var out_buf: [128]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try std.testing.expectError(
+        error.UnsupportedRewritePath,
+        toml.setValueAtPath(
+            src,
+            &[_]toml.PathSegment{ .{ .key = "items" }, .{ .index = 0 }, .{ .key = "name" } },
+            .{ .string = "x" },
+            &w,
+            gpa,
+        ),
+    );
+}
+
+test "rewriteValueAtPath: rewrites indexed array-of-tables entry" {
+    const gpa = std.testing.allocator;
+    const src = "[[products]]\nname = \"Hammer\"\n[[products]]\nname = \"Nail\"\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPath(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "products" }, .{ .index = 1 }, .{ .key = "name" } },
+        .{ .string = "Screw" },
+        &w,
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "[[products]]\nname = \"Hammer\"\n[[products]]\nname = \"Screw\"\n",
+        w.buffered(),
+    );
+}
+
+test "rewriteValueAtPath: missing path returns PathNotFound" {
+    const gpa = std.testing.allocator;
+    const src = "a = 1\n";
+
+    var out_buf: [128]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try std.testing.expectError(
+        error.PathNotFound,
+        toml.rewriteValueAtPath(
+            src,
+            &[_]toml.PathSegment{.{ .key = "b" }},
+            .{ .integer = .{ .value = 2 } },
+            &w,
+            gpa,
+        ),
+    );
+}
+
 test "parseSliceWithSpans: root entry spans include value and full statement" {
     const gpa = std.testing.allocator;
     const src = "title = \"TOML Example\"\n";
