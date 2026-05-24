@@ -66,6 +66,16 @@ fn ParserTy(comptime V: type) type {
         const TableType = TableT;
         const ArrayType = ArrayT;
         const Self = @This();
+        const ParsedKeyPath = struct {
+            parts: std.ArrayList([]u8),
+            styles: std.ArrayList(hints_mod.KeyStyle),
+
+            fn deinit(self: *ParsedKeyPath, gpa: Allocator) void {
+                for (self.parts.items) |part| gpa.free(part);
+                self.parts.deinit(gpa);
+                self.styles.deinit(gpa);
+            }
+        };
 
         gpa: Allocator,
         input: []const u8,
@@ -79,9 +89,9 @@ fn ParserTy(comptime V: type) type {
         err_info: ErrorInfo,
         hints: ?*hints_mod.FormatHints,
         table_path: std.ArrayListUnmanaged([]const u8),
-        cur_key_parts: ?[][]u8,
-        pending_comment: ?[]const u8,
-        trailing_path: std.ArrayListUnmanaged(u8),
+        current_value_path: std.ArrayListUnmanaged(hints_mod.PathSegment),
+        pending_comments: std.ArrayListUnmanaged([]const u8),
+        trailing_path: ?hints_mod.HintPath,
 
         fn init(gpa: Allocator, input: []const u8, hints: ?*hints_mod.FormatHints) Allocator.Error!Self {
             const root = try gpa.create(TableType);
@@ -104,18 +114,32 @@ fn ParserTy(comptime V: type) type {
                 .err_info = .{},
                 .hints = hints,
                 .table_path = .empty,
-                .cur_key_parts = null,
-                .pending_comment = null,
-                .trailing_path = .empty,
+                .current_value_path = .empty,
+                .pending_comments = .empty,
+                .trailing_path = null,
             };
             errdefer p.meta_arena.deinit();
+            if (hints) |h| if (h.document) |document| {
+                if (document.original_source) |source| gpa.free(source);
+                document.* = .{
+                    .has_bom = std.mem.startsWith(u8, input, "\xEF\xBB\xBF"),
+                    .line_ending = if (std.mem.indexOf(u8, input, "\r\n") != null) .crlf else .lf,
+                    .original_source = try gpa.dupe(u8, input),
+                };
+            };
+            if (std.mem.startsWith(u8, input, "\xEF\xBB\xBF")) {
+                p.pos = 3;
+                p.line_start = 3;
+            }
             _ = try p.createMeta(root, .root);
             return p;
         }
 
         fn deinit(self: *Self) void {
             self.table_path.deinit(self.meta_arena.allocator());
-            if (self.hints != null) self.trailing_path.deinit(self.gpa);
+            self.current_value_path.deinit(self.gpa);
+            self.pending_comments.deinit(self.gpa);
+            if (self.trailing_path) |*path| path.deinit(self.gpa);
             self.meta_arena.deinit();
         }
 
@@ -146,44 +170,220 @@ fn ParserTy(comptime V: type) type {
             }
         }
 
-        fn buildPath(self: *Self, key_parts: [][]u8, out: *std.ArrayList(u8)) !void {
-            var first = true;
+        fn buildPath(self: *Self, key_parts: [][]u8, out: *std.ArrayList(hints_mod.PathSegment)) !void {
+            out.clearRetainingCapacity();
+            try out.ensureTotalCapacity(self.gpa, self.table_path.items.len + key_parts.len);
             for (self.table_path.items) |part| {
-                if (!first) try out.append(self.gpa, '.');
-                first = false;
-                try out.appendSlice(self.gpa, part);
+                out.appendAssumeCapacity(.{ .key = part });
             }
             for (key_parts) |part| {
-                if (!first) try out.append(self.gpa, '.');
-                first = false;
-                try out.appendSlice(self.gpa, part);
+                out.appendAssumeCapacity(.{ .key = part });
             }
         }
 
-        fn dupedPath(self: *Self, key_parts: [][]u8) Allocator.Error![]u8 {
-            var path_buf: std.ArrayList(u8) = .empty;
+        fn pathForKey(self: *Self, key_parts: [][]u8, out: *std.ArrayList(hints_mod.PathSegment)) !hints_mod.HintPath {
+            try self.buildPath(key_parts, out);
+            return .{ .segments = out.items };
+        }
+
+        fn dupedPath(self: *Self, key_parts: [][]u8) Allocator.Error!hints_mod.HintPath {
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
             defer path_buf.deinit(self.gpa);
-            try self.buildPath(key_parts, &path_buf);
-            return path_buf.toOwnedSlice(self.gpa);
+            const path = try self.pathForKey(key_parts, &path_buf);
+            return path.clone(self.gpa);
+        }
+
+        fn setCurrentValuePath(self: *Self, key_parts: [][]u8) !void {
+            self.current_value_path.clearRetainingCapacity();
+            try self.current_value_path.ensureTotalCapacity(self.gpa, self.table_path.items.len + key_parts.len);
+            for (self.table_path.items) |part| {
+                self.current_value_path.appendAssumeCapacity(.{ .key = part });
+            }
+            for (key_parts) |part| {
+                self.current_value_path.appendAssumeCapacity(.{ .key = part });
+            }
+        }
+
+        fn pushCurrentValueKeys(self: *Self, parts: [][]u8) !usize {
+            const base_len = self.current_value_path.items.len;
+            try self.current_value_path.ensureTotalCapacity(self.gpa, base_len + parts.len);
+            for (parts) |part| {
+                self.current_value_path.appendAssumeCapacity(.{ .key = part });
+            }
+            return base_len;
+        }
+
+        fn pushCurrentValueIndex(self: *Self, index: usize) !usize {
+            const base_len = self.current_value_path.items.len;
+            try self.current_value_path.ensureTotalCapacity(self.gpa, base_len + 1);
+            self.current_value_path.appendAssumeCapacity(.{ .index = index });
+            return base_len;
+        }
+
+        fn restoreCurrentValuePath(self: *Self, len: usize) void {
+            self.current_value_path.items.len = len;
         }
 
         fn recordStringHint(self: *Self, style: hints_mod.StringStyle) !void {
             const hints = self.hints orelse return;
             const styles = hints.string_styles orelse return;
-            const key_parts = self.cur_key_parts orelse return;
+            if (self.current_value_path.items.len == 0) return;
+            const path = hints_mod.HintPath{ .segments = self.current_value_path.items };
 
-            const owned = try self.dupedPath(key_parts);
-            errdefer self.gpa.free(owned);
+            if (styles.getPtr(path)) |existing| {
+                existing.* = style;
+                return;
+            }
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
             try styles.put(self.gpa, owned, style);
         }
 
-        fn recordCommentForKey(self: *Self, text: []const u8, key_parts: [][]u8) !void {
+        fn recordKeyStyleByPath(self: *Self, path: hints_mod.HintPath, style: hints_mod.KeyStyle) !void {
+            const hints = self.hints orelse return;
+            const key_styles = hints.key_styles orelse return;
+
+            if (key_styles.getPtr(path)) |existing| {
+                existing.* = style;
+                return;
+            }
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+            try key_styles.put(self.gpa, owned, style);
+        }
+
+        fn recordKeyStylesForTablePath(
+            self: *Self,
+            key_parts: [][]u8,
+            key_styles: []const hints_mod.KeyStyle,
+        ) !void {
+            const hints = self.hints orelse return;
+            _ = hints.key_styles orelse return;
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, self.table_path.items.len + key_parts.len);
+            for (self.table_path.items) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+            }
+            for (key_parts, key_styles) |part, style| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordKeyStyleByPath(.{ .segments = path_buf.items }, style);
+            }
+        }
+
+        fn recordKeyStylesForCurrentValuePath(
+            self: *Self,
+            key_parts: [][]u8,
+            key_styles: []const hints_mod.KeyStyle,
+        ) !void {
+            const hints = self.hints orelse return;
+            _ = hints.key_styles orelse return;
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, self.current_value_path.items.len + key_parts.len);
+            for (self.current_value_path.items) |segment| {
+                path_buf.appendAssumeCapacity(segment);
+            }
+            for (key_parts, key_styles) |part, style| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordKeyStyleByPath(.{ .segments = path_buf.items }, style);
+            }
+        }
+
+        fn recordTableSyntaxByPath(self: *Self, path: hints_mod.HintPath, syntax: hints_mod.TableSyntax) !void {
+            const hints = self.hints orelse return;
+            const table_syntax = hints.table_syntax orelse return;
+
+            if (table_syntax.getPtr(path)) |existing| {
+                existing.* = syntax;
+                return;
+            }
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+            try table_syntax.put(self.gpa, owned, syntax);
+        }
+
+        fn recordTableSyntaxForKeyParts(self: *Self, key_parts: [][]u8, syntax: hints_mod.TableSyntax) !void {
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            const path = try self.pathForKey(key_parts, &path_buf);
+            try self.recordTableSyntaxByPath(path, syntax);
+        }
+
+        fn recordTableSyntaxForCurrentValuePath(self: *Self, syntax: hints_mod.TableSyntax) !void {
+            if (self.current_value_path.items.len == 0) return;
+            try self.recordTableSyntaxByPath(.{ .segments = self.current_value_path.items }, syntax);
+        }
+
+        fn appendCommentRecordByPath(
+            self: *Self,
+            path: hints_mod.HintPath,
+            attachment: hints_mod.CommentAttachment,
+            text: []const u8,
+        ) !void {
             const hints = self.hints orelse return;
             const comments = hints.comments orelse return;
 
-            const owned = try self.dupedPath(key_parts);
-            errdefer self.gpa.free(owned);
-            try comments.put(self.gpa, owned, text);
+            if (comments.getPtr(path)) |records| {
+                try records.append(self.gpa, .{ .attachment = attachment, .text = text });
+                return;
+            }
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+
+            var records: hints_mod.CommentList = .empty;
+            errdefer records.deinit(self.gpa);
+            try records.append(self.gpa, .{ .attachment = attachment, .text = text });
+            try comments.put(self.gpa, owned, records);
+        }
+
+        fn appendCommentRecordForKey(
+            self: *Self,
+            key_parts: [][]u8,
+            attachment: hints_mod.CommentAttachment,
+            text: []const u8,
+        ) !void {
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            const path = try self.pathForKey(key_parts, &path_buf);
+            try self.appendCommentRecordByPath(path, attachment, text);
+        }
+
+        fn flushPendingComments(
+            self: *Self,
+            key_parts: [][]u8,
+            attachment: hints_mod.CommentAttachment,
+        ) !void {
+            for (self.pending_comments.items) |text| {
+                try self.appendCommentRecordForKey(key_parts, attachment, text);
+            }
+            self.pending_comments.clearRetainingCapacity();
+        }
+
+        fn captureAttachedComment(
+            self: *Self,
+            key_parts: [][]u8,
+            attachment: hints_mod.CommentAttachment,
+        ) ParseError!void {
+            self.advance();
+            const start = self.pos;
+            while (self.peek()) |c| {
+                if (c == '\n' or c == '\r') break;
+                if (c != '\t' and (c < 0x20 or c == 0x7F))
+                    return self.fail("control character U+{X:0>4} not allowed in comment", .{c});
+                self.advance();
+            }
+            const trimmed = std.mem.trim(u8, self.input[start..self.pos], " \t");
+            if (trimmed.len == 0) return;
+            try self.appendCommentRecordForKey(key_parts, attachment, trimmed);
         }
 
         fn createMeta(self: *Self, tbl: *TableType, kind: TableKind) Allocator.Error!*TableMeta {
@@ -275,13 +475,14 @@ fn ParserTy(comptime V: type) type {
             const hints = self.hints orelse return;
             const comments = hints.comments orelse return;
 
-            if (self.trailing_path.items.len > 0) {
-                const key_owned = try self.gpa.dupe(u8, self.trailing_path.items);
-                errdefer self.gpa.free(key_owned);
-                try comments.put(self.gpa, key_owned, trimmed);
-                self.trailing_path.clearRetainingCapacity();
+            if (self.trailing_path) |path| {
+                _ = comments;
+                try self.appendCommentRecordByPath(path, .trailing_entry, trimmed);
+                var owned = self.trailing_path.?;
+                owned.deinit(self.gpa);
+                self.trailing_path = null;
             } else {
-                self.pending_comment = trimmed;
+                try self.pending_comments.append(self.gpa, trimmed);
             }
         }
 
@@ -324,11 +525,11 @@ fn ParserTy(comptime V: type) type {
 
         // ─── key parsing ─────────────────────────────────────────────────────────
 
-        fn parseKeyPart(self: *Self) ParseError![]u8 {
+        fn parseKeyPart(self: *Self) ParseError!struct { text: []u8, style: hints_mod.KeyStyle } {
             return switch (self.peek() orelse 0) {
-                '"' => self.parseBasicStringRaw(),
-                '\'' => self.parseLiteralStringRaw(),
-                else => self.parseBareKey(),
+                '"' => .{ .text = try self.parseBasicStringRaw(), .style = .basic },
+                '\'' => .{ .text = try self.parseLiteralStringRaw(), .style = .literal },
+                else => .{ .text = try self.parseBareKey(), .style = .bare },
             };
         }
 
@@ -341,28 +542,32 @@ fn ParserTy(comptime V: type) type {
             return try self.gpa.dupe(u8, self.input[start..self.pos]);
         }
 
-        fn parseDottedKey(self: *Self) ParseError!std.ArrayList([]u8) {
+        fn parseDottedKey(self: *Self) ParseError!ParsedKeyPath {
             var parts: std.ArrayList([]u8) = .empty;
+            var styles: std.ArrayList(hints_mod.KeyStyle) = .empty;
             errdefer {
                 for (parts.items) |p| self.gpa.free(p);
                 parts.deinit(self.gpa);
+                styles.deinit(self.gpa);
             }
             const first = try self.parseKeyPart();
             var first_owned = true;
-            errdefer if (first_owned) self.gpa.free(first);
-            try parts.append(self.gpa, first);
+            errdefer if (first_owned) self.gpa.free(first.text);
+            try parts.append(self.gpa, first.text);
             first_owned = false;
+            try styles.append(self.gpa, first.style);
             while (true) {
                 self.skipInlineWs();
                 if (!self.eat('.')) break;
                 self.skipInlineWs();
                 const next_key = try self.parseKeyPart();
                 var next_owned = true;
-                errdefer if (next_owned) self.gpa.free(next_key);
-                try parts.append(self.gpa, next_key);
+                errdefer if (next_owned) self.gpa.free(next_key.text);
+                try parts.append(self.gpa, next_key.text);
                 next_owned = false;
+                try styles.append(self.gpa, next_key.style);
             }
-            return parts;
+            return .{ .parts = parts, .styles = styles };
         }
 
         // ─── string parsing ───────────────────────────────────────────────────────
@@ -944,10 +1149,15 @@ fn ParserTy(comptime V: type) type {
                 self.gpa.destroy(arr);
             }
             try self.skipTrivia();
+            var next_index: usize = 0;
             while (self.peek() != ']') {
                 if (self.peek() == null) return self.fail("unterminated array", .{});
+                const path_len = try self.pushCurrentValueIndex(next_index);
+                errdefer self.restoreCurrentValuePath(path_len);
                 const v = try self.parseValue();
+                self.restoreCurrentValuePath(path_len);
                 try arr.append(self.gpa, v);
+                next_index += 1;
                 try self.skipTrivia();
                 if (!self.eat(',')) {
                     try self.skipTrivia();
@@ -968,21 +1178,27 @@ fn ParserTy(comptime V: type) type {
                 self.gpa.destroy(tbl);
             }
             _ = try self.createMeta(tbl, .inline_t);
+            const open_pos = self.pos;
             try self.skipTrivia();
+            const padded_after_open = self.pos != open_pos;
+            var padded_before_close = false;
             while (self.peek() != '}') {
                 if (self.peek() == null) return self.fail("unterminated inline table", .{});
                 var key_parts = try self.parseDottedKey();
-                defer {
-                    for (key_parts.items) |p| self.gpa.free(p);
-                    key_parts.deinit(self.gpa);
-                }
+                defer key_parts.deinit(self.gpa);
+                try self.recordKeyStylesForCurrentValuePath(key_parts.parts.items, key_parts.styles.items);
                 self.skipInlineWs();
                 try self.expect('=');
                 self.skipInlineWs();
+                const path_len = try self.pushCurrentValueKeys(key_parts.parts.items);
+                errdefer self.restoreCurrentValuePath(path_len);
                 const val = try self.parseValue();
+                self.restoreCurrentValuePath(path_len);
                 errdefer self.dropValue(val);
-                try self.setNestedKey(tbl, key_parts.items, val, true);
+                try self.setNestedKey(tbl, key_parts.parts.items, val, true);
+                const trivia_start = self.pos;
                 try self.skipTrivia();
+                if (self.peek() == '}' and self.pos != trivia_start) padded_before_close = true;
                 if (!self.eat(',')) {
                     try self.skipTrivia();
                     break;
@@ -990,6 +1206,7 @@ fn ParserTy(comptime V: type) type {
                 try self.skipTrivia();
             }
             try self.expect('}');
+            try self.recordTableSyntaxForCurrentValuePath(if (padded_after_open or padded_before_close) .inline_spaced else .inline_compact);
             return .{ .table = tbl };
         }
 
@@ -1075,14 +1292,11 @@ fn ParserTy(comptime V: type) type {
             try self.expect('[');
             self.skipInlineWs();
             var key_parts = try self.parseDottedKey();
-            defer {
-                for (key_parts.items) |p| self.gpa.free(p);
-                key_parts.deinit(self.gpa);
-            }
+            defer key_parts.deinit(self.gpa);
+            try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
 
-            if (self.pending_comment) |c| {
-                try self.recordCommentForKey(c, key_parts.items);
-                self.pending_comment = null;
+            if (self.pending_comments.items.len > 0) {
+                try self.flushPendingComments(key_parts.parts.items, .before_table);
             }
 
             self.skipInlineWs();
@@ -1090,9 +1304,11 @@ fn ParserTy(comptime V: type) type {
             self.skipInlineWs();
             if (!self.isEOL() and self.peek() != '#' and self.peek() != null)
                 return self.fail("extra content after table header", .{});
+            if (self.peek() == '#') try self.captureAttachedComment(key_parts.parts.items, .trailing_table);
             try self.skipToEOL();
-            self.cur = try self.navigateToHeaderTable(self.root, key_parts.items);
-            try self.setTablePath(key_parts.items);
+            try self.recordTableSyntaxForKeyParts(key_parts.parts.items, .header);
+            self.cur = try self.navigateToHeaderTable(self.root, key_parts.parts.items);
+            try self.setTablePath(key_parts.parts.items);
         }
 
         fn parseAOTHeader(self: *Self) ParseError!void {
@@ -1100,14 +1316,11 @@ fn ParserTy(comptime V: type) type {
             try self.expect('[');
             self.skipInlineWs();
             var key_parts = try self.parseDottedKey();
-            defer {
-                for (key_parts.items) |p| self.gpa.free(p);
-                key_parts.deinit(self.gpa);
-            }
+            defer key_parts.deinit(self.gpa);
+            try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
 
-            if (self.pending_comment) |c| {
-                try self.recordCommentForKey(c, key_parts.items);
-                self.pending_comment = null;
+            if (self.pending_comments.items.len > 0) {
+                try self.flushPendingComments(key_parts.parts.items, .before_aot);
             }
 
             self.skipInlineWs();
@@ -1116,9 +1329,11 @@ fn ParserTy(comptime V: type) type {
             self.skipInlineWs();
             if (!self.isEOL() and self.peek() != '#' and self.peek() != null)
                 return self.fail("extra content after array-of-tables header", .{});
+            if (self.peek() == '#') try self.captureAttachedComment(key_parts.parts.items, .trailing_aot);
             try self.skipToEOL();
-            self.cur = try self.navigateToAOT(self.root, key_parts.items);
-            try self.setTablePath(key_parts.items);
+            try self.recordTableSyntaxForKeyParts(key_parts.parts.items, .aot);
+            self.cur = try self.navigateToAOT(self.root, key_parts.parts.items);
+            try self.setTablePath(key_parts.parts.items);
         }
 
         // Navigate intermediate path segments (all but the last), creating implicit
@@ -1244,45 +1459,41 @@ fn ParserTy(comptime V: type) type {
 
         fn parseKeyVal(self: *Self) ParseError!void {
             var key_parts = try self.parseDottedKey();
-            defer {
-                for (key_parts.items) |p| self.gpa.free(p);
-                key_parts.deinit(self.gpa);
-            }
+            defer key_parts.deinit(self.gpa);
+            try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
 
-            if (self.pending_comment) |c| {
-                try self.recordCommentForKey(c, key_parts.items);
-                self.pending_comment = null;
+            if (self.pending_comments.items.len > 0) {
+                try self.flushPendingComments(key_parts.parts.items, .before_entry);
             }
 
             self.skipInlineWs();
             try self.expect('=');
             self.skipInlineWs();
-            self.cur_key_parts = key_parts.items;
+            try self.setCurrentValuePath(key_parts.parts.items);
+            defer self.current_value_path.clearRetainingCapacity();
             const val = try self.parseValue();
-            self.cur_key_parts = null;
             errdefer self.dropValue(val);
-            try self.setNestedKey(self.cur, key_parts.items, val, false);
+            try self.setNestedKey(self.cur, key_parts.parts.items, val, false);
 
             // Save path so the upcoming trailing comment (parsed after this function
-        // returns) can be stored under the right key in FormatHints.
+            // returns) can be stored under the right key in FormatHints.
             if (self.hints != null and self.hints.?.comments != null) {
-                self.trailing_path.clearRetainingCapacity();
-                var buf: std.ArrayList(u8) = .empty;
-                defer buf.deinit(self.gpa);
-                try self.buildPath(key_parts.items, &buf);
-                try self.trailing_path.appendSlice(self.gpa, buf.items);
+                if (self.trailing_path) |*path| path.deinit(self.gpa);
+                self.trailing_path = try self.dupedPath(key_parts.parts.items);
             }
         }
 
         fn parseDocument(self: *Self) ParseError!void {
-            if (!std.unicode.utf8ValidateSlice(self.input))
+            const doc_input = if (std.mem.startsWith(u8, self.input, "\xEF\xBB\xBF")) self.input[3..] else self.input;
+            if (!std.unicode.utf8ValidateSlice(doc_input))
                 return self.fail("document is not valid UTF-8", .{});
             while (true) {
                 try self.skipTrivia();
                 const c = self.peek() orelse break;
                 switch (c) {
                     '[' => {
-                        self.trailing_path.clearRetainingCapacity();
+                        if (self.trailing_path) |*path| path.deinit(self.gpa);
+                        self.trailing_path = null;
                         if (self.peekAt(1) == '[') try self.parseAOTHeader() else try self.parseTableHeader();
                     },
                     else => {
@@ -1291,7 +1502,8 @@ fn ParserTy(comptime V: type) type {
                         const next = self.peek() orelse break;
                         switch (next) {
                             '\n', '\r' => {
-                                self.trailing_path.clearRetainingCapacity();
+                                if (self.trailing_path) |*path| path.deinit(self.gpa);
+                                self.trailing_path = null;
                                 try self.eatNewline();
                             },
                             '#' => {

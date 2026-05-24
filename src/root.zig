@@ -92,7 +92,19 @@ pub const WriteOptions = output_toml.WriteOptions;
 
 pub const FormatHints = hints_mod.FormatHints;
 pub const StringStyle = hints_mod.StringStyle;
+pub const KeyStyle = hints_mod.KeyStyle;
+pub const TableSyntax = hints_mod.TableSyntax;
+pub const LineEnding = hints_mod.LineEnding;
+pub const DocumentHints = hints_mod.DocumentHints;
+pub const PathSegment = hints_mod.PathSegment;
+pub const HintPath = hints_mod.HintPath;
 pub const HintMap = hints_mod.HintMap;
+pub const KeyStyleMap = hints_mod.KeyStyleMap;
+pub const TableSyntaxMap = hints_mod.TableSyntaxMap;
+pub const CommentAttachment = hints_mod.CommentAttachment;
+pub const CommentRecord = hints_mod.CommentRecord;
+pub const CommentList = hints_mod.CommentList;
+pub const CommentMap = hints_mod.CommentMap;
 
 /// Parse `input` with format hints collection.
 ///

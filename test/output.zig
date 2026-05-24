@@ -587,6 +587,338 @@ test "formatter: prefer_headers round-trips correctly" {
     try std.testing.expect(tablesEqual(root, root2));
 }
 
+test "profile: faithful preserves leading and trailing entry comments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\# lead
+        \\key = "value" # trail
+    ;
+
+    var comments: toml.CommentMap = .empty;
+    var hints: toml.FormatHints = .{ .comments = &comments };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    const expected = src ++ "\n";
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful preserves multiple leading comments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\# first
+        \\# second
+        \\key = "value"
+    ;
+
+    var comments: toml.CommentMap = .empty;
+    var hints: toml.FormatHints = .{ .comments = &comments };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    const expected = src ++ "\n";
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful keeps quoted-dot and nested path hints distinct" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\"a.b" = "flat"
+        \\
+        \\[a]
+        \\b = 'nested'
+    ;
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var hints: toml.FormatHints = .{ .string_styles = &styles };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    const flat_segments = [_]toml.PathSegment{.{ .key = "a.b" }};
+    const nested_segments = [_]toml.PathSegment{ .{ .key = "a" }, .{ .key = "b" } };
+    try std.testing.expectEqual(toml.StringStyle.basic, styles.get(.{ .segments = &flat_segments }).?);
+    try std.testing.expectEqual(toml.StringStyle.literal, styles.get(.{ .segments = &nested_segments }).?);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "= \"flat\""));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "= 'nested'"));
+}
+
+test "profile: faithful preserves table header comments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\title = "root"
+        \\
+        \\# lead
+        \\[section] # trail
+        \\key = "value"
+    ;
+    const expected = src ++ "\n";
+
+    var comments: toml.CommentMap = .empty;
+    var hints: toml.FormatHints = .{ .comments = &comments };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful preserves AOT header comments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\title = "root"
+        \\
+        \\# lead
+        \\[[items]] # trail
+        \\name = "value"
+    ;
+    const expected = src ++ "\n";
+
+    var comments: toml.CommentMap = .empty;
+    var hints: toml.FormatHints = .{ .comments = &comments };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful preserves multiline basic string style" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\mb = """
+        \\line1
+        \\line2
+        \\"""
+    ;
+    const expected = src ++ "\n";
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var hints: toml.FormatHints = .{ .string_styles = &styles };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful preserves multiline literal string style" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src =
+        \\ml = '''
+        \\line1
+        \\line2
+        \\'''
+    ;
+    const expected = src ++ "\n";
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var hints: toml.FormatHints = .{ .string_styles = &styles };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful preserves string styles in inline tables" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = "cfg = { literal = 'lit', basic = \"basic\" }\n";
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var hints: toml.FormatHints = .{ .string_styles = &styles };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "literal = 'lit'"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, w.buffered(), 1, "basic = \"basic\""));
+}
+
+test "profile: faithful preserves string styles in arrays" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = "arr = ['lit', \"basic\"]\n";
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var hints: toml.FormatHints = .{ .string_styles = &styles };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(src, w.buffered());
+}
+
+test "profile: faithful preserves key quote styles and inline table syntax" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = "\"a.b\" = \"flat\"\n" ++
+        "cfg = { \"nested.key\" = \"value\" }\n" ++
+        "\n" ++
+        "[\"table.part\"]\n" ++
+        "\"child.key\" = \"value\"";
+    const expected = src ++ "\n";
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var hints: toml.FormatHints = .{ .key_styles = &key_styles, .table_syntax = &table_syntax };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(expected, w.buffered());
+}
+
+test "profile: faithful preserves CRLF line endings" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = "title = \"root\"\r\n\r\n[section]\r\nkey = \"value\"\r\n";
+
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{ .document = &document };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(src, w.buffered());
+}
+
+test "profile: faithful preserves UTF-8 BOM" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = "\xEF\xBB\xBFkey = \"value\"\n";
+
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{ .document = &document };
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(src, w.buffered());
+}
+
+fn expectFaithfulExactRoundtrip(gpa: std.mem.Allocator, src: []const u8) !void {
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var key_styles: toml.KeyStyleMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .string_styles = &styles,
+        .key_styles = &key_styles,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    const out_buf = try gpa.alloc(u8, src.len * 16 + 4096);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings(src, w.buffered());
+}
+
+test "profile: faithful exact roundtrip comment fixture everywhere" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try expectFaithfulExactRoundtrip(arena.allocator(), @embedFile("valid/comment/everywhere.toml"));
+}
+
+test "profile: faithful exact roundtrip comment fixture without eol" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try expectFaithfulExactRoundtrip(arena.allocator(), @embedFile("valid/comment/noeol.toml"));
+}
+
+test "profile: faithful exact roundtrip quoted dotted keys fixture" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try expectFaithfulExactRoundtrip(arena.allocator(), @embedFile("valid/key/quoted-dots.toml"));
+}
+
+test "profile: faithful does not replay stale source after mutation" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = "answer = 41\n";
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var key_styles: toml.KeyStyleMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .string_styles = &styles,
+        .key_styles = &key_styles,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("answer").?.* = .{ .integer = .{ .value = 42 } };
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+    try std.testing.expectEqualStrings("answer = 42\n", w.buffered());
+}
+
 // ─── Phase 6 test coverage ─────────────────────────────────────────────────────
 
 test "writeToml: integer hex base roundtrips as 0x" {

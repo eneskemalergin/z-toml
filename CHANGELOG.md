@@ -5,6 +5,34 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- `CommentAttachment`, `CommentRecord`, `CommentList`, and `CommentMap` types for attachment-aware format comment hints.
+- `PathSegment` and `HintPath` types for segment-based hint identity shared by parser capture and writer lookups.
+- `KeyStyle`, `KeyStyleMap`, `TableSyntax`, `TableSyntaxMap`, `LineEnding`, and `DocumentHints` types for lexical faithful-output preservation.
+- Faithful comment regression tests covering multiple leading entry comments and same-line trailing entry comments on the same key.
+- Regression coverage for quoted-dot keys so `"a.b"` hint identity no longer collides with nested `a.b` paths.
+- Faithful regression coverage for leading and trailing comments on table headers and array-of-tables headers.
+- Faithful regression coverage for multiline string styles and nested string-style hints inside arrays and inline tables.
+- Faithful regression coverage for key quote styles, inline-table syntax, CRLF line endings, and UTF-8 BOM preservation.
+- Fixture regressions covering exact faithful roundtrips for `test/valid/comment/everywhere.toml`, `test/valid/comment/noeol.toml`, and `test/valid/key/quoted-dots.toml`, plus a guard that mutated trees do not replay stale source.
+
+### Changed
+
+- `FormatHints.comments` now stores ordered comment records instead of a single comment string per path.
+- `FormatHints` maps now use segment-based path keys instead of flattened dotted strings, and can optionally carry document-level line/BOM hints plus key-style and table-syntax hints.
+- `parseSliceWithHints` accumulates multiple leading comments and preserves trailing entry comments without overwriting earlier records.
+- `parseSliceWithHints` and `writeTomlWithProfile(..., .faithful, ...)` now distinguish quoted-dot keys from nested paths during hint lookup.
+- `writeTomlWithProfile(..., .faithful, ...)` now re-emits multiple leading entry comments and same-line trailing entry comments for the same path.
+- `writeTomlWithProfile(..., .faithful, ...)` now re-emits leading and same-line trailing comments for table headers and array-of-tables headers.
+- `parseSliceWithHints` now tracks nested string-style hint paths through arrays and inline tables.
+- `writeTomlWithProfile(..., .faithful, ...)` now preserves `.multiline_basic` and `.multiline_literal` styles and keeps hint lookups alive for nested array and inline-table values.
+- `parseSliceWithHints` now records quoted-key style, inline-table compact versus spaced syntax, UTF-8 BOM presence, and LF versus CRLF document line endings.
+- `writeTomlWithProfile(..., .faithful, ...)` now preserves basic-versus-literal key quoting, inline-table brace spacing, UTF-8 BOMs, and CRLF output when those lexical hints were present in the source.
+- `DocumentHints` now keeps an owned copy of the original TOML source, and `writeTomlWithProfile(..., .faithful, ...)` re-emits those exact bytes when the current value tree still matches the parsed document. Modified trees continue to use the synthesized faithful writer.
+
 ## [0.3.0] - 2026-05-20 - [Tagged]
 
 ### Added
