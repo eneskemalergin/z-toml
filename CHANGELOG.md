@@ -5,7 +5,7 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-05-24
 
 ### Added
 
