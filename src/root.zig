@@ -87,8 +87,12 @@ pub const toJson = json_output.toJson;
 
 /// Serialize a parsed `Value` tree as TOML text to `w`.
 ///
-/// Nested tables use dotted keys or inline tables; arrays of tables
-/// use `[[...]]` headers. Output is always valid TOML v1.1.0.
+/// Nested tables use `[header]` syntax and arrays of tables use `[[...]]`
+/// headers. Scalar-only table values may still be emitted inline when the
+/// chosen options allow it. Output is always valid TOML v1.1.0.
+///
+/// The default path uses `std.heap.page_allocator` for any temporary
+/// serializer allocations, so callers must still handle `error.OutOfMemory`.
 pub const writeToml = output_toml.writeToml;
 
 /// Serialize `value` with formatting options.
@@ -140,6 +144,10 @@ pub const CommentMap = hints_mod.CommentMap;
 /// Same as `parseSlice` but also populates `hints` with string styles,
 /// entry order, and comments captured during parsing. Pass null for
 /// no hint collection (identical to `parseSlice`).
+///
+/// The caller owns the pointed-to hint storage. Parsing inserts owned entries
+/// into whichever maps or document record are provided. Call `hints.deinit(gpa)`
+/// when done to free those entries and reset the populated stores in place.
 pub fn parseSliceWithHints(
     gpa: std.mem.Allocator,
     input: []const u8,
@@ -149,6 +157,10 @@ pub fn parseSliceWithHints(
     return parser_mod.parseSliceWithHints(gpa, input, err_info, hints);
 }
 
+/// Parse `input` while collecting rewrite-ready spans on structured paths.
+///
+/// The optional `spans` store is caller-owned. Parsing fills it with value
+/// spans, full statement spans, and table or array-of-tables header spans.
 pub fn parseSliceWithSpans(
     gpa: std.mem.Allocator,
     input: []const u8,
@@ -158,6 +170,13 @@ pub fn parseSliceWithSpans(
     return parser_mod.parseSliceWithSpans(gpa, input, err_info, spans);
 }
 
+/// Parse with explicit parse-time extensions.
+///
+/// Use this when you need both fidelity hints and rewrite spans from one parse.
+/// `options.hints`, when present, follows the same ownership model as
+/// `parseSliceWithHints`: the caller owns the storage container, while the parse
+/// operation owns the inserted entries until `deinit(gpa)` is called on that
+/// hint set.
 pub fn parseSliceWithOptions(
     gpa: std.mem.Allocator,
     input: []const u8,
@@ -684,7 +703,9 @@ pub const OutputProfile = hints_mod.OutputProfile;
 /// Serialize `value` as TOML with a named profile.
 ///
 /// Profiles set multiple `WriteOptions` at once and optionally
-/// consume `hints` for string style and comment fidelity.
+/// consume `hints` for string-style, comment, lexeme, table-syntax, and
+/// document-level fidelity. With `.faithful` and matching hints, unchanged
+/// parsed documents can be replayed byte-for-byte.
 pub fn writeTomlWithProfile(
     value: Value,
     w: *std.Io.Writer,

@@ -1029,11 +1029,8 @@ fn writeTable(
 ///
 /// Uses `[header]` syntax for sub-tables and `[[...]]` for arrays of
 /// tables. All output is valid TOML v1.1.0.
-pub fn writeToml(value: Value, w: *std.Io.Writer) std.Io.Writer.Error!void {
-    return writeTomlOpts(value, w, .{}, std.heap.page_allocator) catch |e| switch (e) {
-        error.OutOfMemory => unreachable, // page allocator won't fail for small keys
-        else => |other| return other,
-    };
+pub fn writeToml(value: Value, w: *std.Io.Writer) (std.Io.Writer.Error || Allocator.Error)!void {
+    return writeTomlOpts(value, w, .{}, std.heap.page_allocator);
 }
 
 /// Serialize `value` as TOML text with custom `opts`.

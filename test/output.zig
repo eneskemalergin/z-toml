@@ -297,9 +297,9 @@ test "writeToml: spec-example-1 roundtrip" {
     try roundtrip(gpa, src);
 }
 
-fn tomlString(value: toml.Value, buf: *[65536]u8) []const u8 {
+fn tomlString(value: toml.Value, buf: *[65536]u8) ![]const u8 {
     var w = std.Io.Writer.fixed(buf);
-    toml.writeToml(value, &w) catch unreachable;
+    try toml.writeToml(value, &w);
     return w.buffered();
 }
 
@@ -323,7 +323,7 @@ test "formatter: default opts matches writeToml" {
 
     var buf1: [65536]u8 = undefined;
     var buf2: [65536]u8 = undefined;
-    const out1 = tomlString(.{ .table = root }, &buf1);
+    const out1 = try tomlString(.{ .table = root }, &buf1);
     const out2 = tomlStringDefault(.{ .table = root }, &buf2);
     try std.testing.expectEqualStrings(out1, out2);
 }
@@ -339,7 +339,7 @@ test "formatter: insertion order preserved by default" {
     defer toml.deinit(root, gpa);
 
     var buf: [65536]u8 = undefined;
-    const out = tomlString(.{ .table = root }, &buf);
+    const out = try tomlString(.{ .table = root }, &buf);
     try std.testing.expect(std.mem.startsWith(u8, out, "z = \"last\"\na = \"first\"\nm = \"middle\""));
 }
 

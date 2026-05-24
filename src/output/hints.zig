@@ -127,6 +127,17 @@ pub const ValueLexemeMap = HintMap([]const u8);
 pub const TableSyntaxMap = HintMap(TableSyntax);
 pub const CommentMap = HintMap(CommentList);
 
+/// Aggregates optional fidelity stores populated during parsing.
+///
+/// The pointed-to maps and `DocumentHints` storage are caller-owned. They may
+/// live on the stack, in an arena, or inside a larger caller-managed struct.
+/// Parsing allocates and inserts owned entries into whichever stores are
+/// provided.
+///
+/// `deinit(gpa)` frees those inserted entries, clears any owned
+/// `document.original_source`, deinitializes the pointed-to maps in place, and
+/// resets `self` to the empty state. It does not destroy the map structs or the
+/// `DocumentHints` container itself.
 pub const FormatHints = struct {
     string_styles: ?*HintMap(StringStyle) = null,
     key_styles: ?*KeyStyleMap = null,
@@ -136,6 +147,9 @@ pub const FormatHints = struct {
     comments: ?*CommentMap = null,
     document: ?*DocumentHints = null,
 
+    /// Free all entries owned through this hint set and reset it to empty.
+    ///
+    /// Safe to call on partially-populated hint stores after a failed parse.
     pub fn deinit(self: *FormatHints, gpa: std.mem.Allocator) void {
         if (self.string_styles) |styles| {
             var it = styles.iterator();
