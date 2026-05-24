@@ -1592,6 +1592,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 errdefer self.restoreCurrentValuePath(path_len);
                 errdefer self.restoreCurrentSpanPath(span_path_len);
                 const v = try self.parseValue();
+                errdefer self.dropValue(v);
                 self.restoreCurrentValuePath(path_len);
                 self.restoreCurrentSpanPath(span_path_len);
                 try arr.append(self.gpa, v);
@@ -1613,7 +1614,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             tbl.* = .empty;
             errdefer {
                 self.dropTable(tbl);
-                self.gpa.destroy(tbl);
+                if (comptime V == types.Value) self.gpa.destroy(tbl);
             }
             _ = try self.createMeta(tbl, .inline_t);
             const open_pos = self.pos;

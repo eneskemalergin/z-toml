@@ -95,6 +95,18 @@ pub fn build(b: *std.Build) void {
     const install_runner = b.addInstallArtifact(bench_runner, .{});
     b.step("install-bench", "Install bench-runner to zig-out/bin").dependOn(&install_runner.step);
 
+    const fuzz_exe = b.addExecutable(.{
+        .name = "fuzz-runner",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/fuzz.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "toml", .module = toml_module },
+            },
+        }),
+    });
+
     const fuzz_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("test/fuzz.zig"),
@@ -107,9 +119,10 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_tests = b.addRunArtifact(tests);
-    const run_fuzz = b.addRunArtifact(fuzz_tests);
+    const run_fuzz = b.addRunArtifact(fuzz_exe);
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
     b.step("fuzz", "Run fuzz harness (5,000 random inputs)").dependOn(&run_fuzz.step);
+    b.step("fuzz-test", "Run fuzz harness through Zig's test runner").dependOn(&b.addRunArtifact(fuzz_tests).step);
     b.step("example", "Run the example TOML parser").dependOn(&run_example.step);
     b.step("proteomics", "Parse and print proteomics.toml").dependOn(&run_proteomics.step);
 }

@@ -9,21 +9,7 @@
 const std = @import("std");
 const toml = @import("toml");
 
-fn walkValue(value: toml.Value) void {
-    switch (value) {
-        .table => |t| walkTable(t),
-        .array => |a| for (a.items) |item| walkValue(item),
-        else => {},
-    }
-}
-
-fn walkTable(tree: *const toml.Table) void {
-    for (tree.keys(), tree.values()) |_, val| {
-        walkValue(val);
-    }
-}
-
-test "fuzz: random byte sequences never crash" {
+fn runFuzz(base_allocator: std.mem.Allocator) !void {
     const count = 5000;
 
     const seed: u64 = 0xF0F0_F0F0_F0F0_F0F0;
@@ -33,7 +19,7 @@ test "fuzz: random byte sequences never crash" {
     for (0..count) |i| {
         // Use testing.allocator with a standalone arena per iteration.
         // The arena owns all parse allocations and releases them at once.
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        var arena = std.heap.ArenaAllocator.init(base_allocator);
         defer arena.deinit();
         const alloc = arena.allocator();
 
@@ -66,4 +52,26 @@ test "fuzz: random byte sequences never crash" {
     }
 
     std.debug.print("  fuzz done: {d} iterations, 0 crashes\n", .{count});
+}
+
+pub fn main() !void {
+    try runFuzz(std.heap.page_allocator);
+}
+
+fn walkValue(value: toml.Value) void {
+    switch (value) {
+        .table => |t| walkTable(t),
+        .array => |a| for (a.items) |item| walkValue(item),
+        else => {},
+    }
+}
+
+fn walkTable(tree: *const toml.Table) void {
+    for (tree.keys(), tree.values()) |_, val| {
+        walkValue(val);
+    }
+}
+
+test "fuzz: random byte sequences never crash" {
+    try runFuzz(std.testing.allocator);
 }

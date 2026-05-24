@@ -247,125 +247,40 @@ fn roundtrip(gpa: std.mem.Allocator, src: []const u8) !void {
     }
 }
 
-test "writeToml: simple scalars roundtrip" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa, "key = \"value\"\n");
-    try roundtrip(gpa, "count = 42\n");
-    try roundtrip(gpa, "pi = 3.14\n");
-    try roundtrip(gpa, "flag = true\n");
+fn writeProfileOwned(
+    gpa: std.mem.Allocator,
+    value: toml.Value,
+    profile: toml.OutputProfile,
+    hints: ?*toml.FormatHints,
+) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    try toml.writeTomlWithProfile(value, &out.writer, profile, hints, gpa);
+    return try out.toOwnedSlice();
 }
 
-test "writeToml: special floats" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa, "a = inf\n");
-    try roundtrip(gpa, "a = -inf\n");
-    try roundtrip(gpa, "a = nan\n");
+fn expectReparseMatches(gpa: std.mem.Allocator, root: *toml.Table, written: []const u8) !void {
+    var err: toml.ErrorInfo = .{};
+    const reparsed = try toml.parseSlice(gpa, written, &err);
+    defer toml.deinit(reparsed, gpa);
+    try std.testing.expect(tablesEqual(root, reparsed));
 }
 
-test "writeToml: arrays" {
+test "writeToml: corpus edge fixtures roundtrip" {
     const gpa = std.testing.allocator;
-    try roundtrip(gpa, "arr = [1, 2, 3]\n");
-    try roundtrip(gpa, "arr = []\n");
-    try roundtrip(gpa, "arr = [\"a\", \"b\"]\n");
-    try roundtrip(gpa, "arr = [[1, 2], [3]]\n");
-}
+    const fixtures = [_][]const u8{
+        "test/valid/key/quoted-dots.toml",
+        "test/valid/string/escape-tricky.toml",
+        "test/valid/table/with-single-quotes.toml",
+        "test/valid/table/array-implicit-and-explicit-after.toml",
+        "test/valid/table/array-table-array.toml",
+    };
 
-test "writeToml: inline table" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa, "pt = {x = 1, y = 2}\n");
-}
-
-test "writeToml: dotted keys for nested tables" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa,
-        \\[owner]
-        \\name = "Tom"
-        \\[owner.details]
-        \\age = 30
-    );
-}
-
-test "writeToml: array of tables" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa,
-        \\[[products]]
-        \\name = "Hammer"
-        \\
-        \\[[products]]
-        \\name = "Nail"
-    );
-}
-
-test "writeToml: nested AOT with sub-table" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa,
-        \\[[fruits]]
-        \\name = "apple"
-        \\[fruits.physical]
-        \\color = "red"
-        \\
-        \\[[fruits]]
-        \\name = "banana"
-        \\[fruits.physical]
-        \\color = "yellow"
-    );
-}
-
-test "writeToml: nested AOT with sub-AOT" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa,
-        \\[[fruits]]
-        \\name = "apple"
-        \\[[fruits.varieties]]
-        \\name = "red delicious"
-        \\[[fruits.varieties]]
-        \\name = "granny smith"
-        \\
-        \\[[fruits]]
-        \\name = "banana"
-        \\[[fruits.varieties]]
-        \\name = "plantain"
-    );
-}
-
-test "writeToml: all datetime types" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa, "dt = 1979-05-27T07:32:00Z\n");
-    try roundtrip(gpa, "dt = 1979-05-27T07:32:00.5Z\n");
-    try roundtrip(gpa, "dt = 1979-05-27T07:32:00-07:00\n");
-    try roundtrip(gpa, "dt = 1979-05-27T07:32:00\n");
-    try roundtrip(gpa, "d = 1979-05-27\n");
-    try roundtrip(gpa, "t = 07:32:00\n");
-    try roundtrip(gpa, "t = 07:32:00.5\n");
-}
-
-test "writeToml: empty document" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa, "");
-}
-
-test "writeToml: quoted keys" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa, "\"127.0.0.1\" = \"localhost\"\n");
-    try roundtrip(gpa, "'quoted key' = true\n");
-}
-
-test "writeToml: dotted key at root creates implicit tables" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa,
-        \\server.host = "example.com"
-        \\server.port = 443
-    );
-}
-
-test "writeToml: mixed root and dotted" {
-    const gpa = std.testing.allocator;
-    try roundtrip(gpa,
-        \\title = "My App"
-        \\[database]
-        \\host = "localhost"
-        \\port = 5432
-    );
+    for (fixtures) |fixture| {
+        const src = try support.readTestFile(gpa, fixture);
+        defer gpa.free(src);
+        try roundtrip(gpa, src);
+    }
 }
 
 test "writeToml: proteomics file roundtrip" {
@@ -568,6 +483,119 @@ test "formatter: default escape uses \\u001B for ESC" {
     try toml.writeTomlOpts(.{ .table = root }, &w, .{}, gpa);
     const out = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, out, "\\u001B[31m") != null);
+}
+
+test "profile: compact produces semantic delta on spec-example fixture" {
+    const gpa = std.testing.allocator;
+    const src = try support.readTestFile(gpa, "test/valid/spec-example-1.toml");
+    defer gpa.free(src);
+
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    const written = try writeProfileOwned(gpa, .{ .table = root }, .compact, null);
+    defer gpa.free(written);
+
+    try std.testing.expect(!std.mem.eql(u8, src, written));
+    try std.testing.expect(std.mem.indexOf(u8, written, "[owner]") == null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "owner = {name = \"Lance Uppercut\", dob = 1979-05-27T07:32:00-08:00}") != null);
+    try expectReparseMatches(gpa, root, written);
+}
+
+test "profile: compact inlines scalar-only tables while preserve keeps headers" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\[owner]
+        \\name = "Tom"
+    ;
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    var compact_buf: [256]u8 = undefined;
+    var compact_writer = std.Io.Writer.fixed(&compact_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &compact_writer, .compact, null, gpa);
+    try std.testing.expectEqualStrings("owner = {name = \"Tom\"}\n", compact_writer.buffered());
+
+    var preserve_buf: [256]u8 = undefined;
+    var preserve_writer = std.Io.Writer.fixed(&preserve_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &preserve_writer, .preserve, null, gpa);
+    try std.testing.expectEqualStrings("\n[owner]\nname = \"Tom\"\n", preserve_writer.buffered());
+}
+
+test "profile: canonical sorts keys and uses escape-e" {
+    const gpa = std.testing.allocator;
+    const src =
+        \\z = 1
+        \\s = "\e[31m"
+        \\a = 2
+    ;
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .canonical, null, gpa);
+    try std.testing.expectEqualStrings("a = 2\ns = \"\\e[31m\"\nz = 1\n", w.buffered());
+}
+
+test "profile: canonical sorts real fixture sections without changing tree" {
+    const gpa = std.testing.allocator;
+    const src = try support.readTestFile(gpa, "test/valid/spec-example-1.toml");
+    defer gpa.free(src);
+
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    const written = try writeProfileOwned(gpa, .{ .table = root }, .canonical, null);
+    defer gpa.free(written);
+
+    try std.testing.expect(!std.mem.eql(u8, src, written));
+    const owner_pos = std.mem.indexOf(u8, written, "[owner]\n") orelse return error.TestUnexpectedResult;
+    const dob_pos = std.mem.indexOf(u8, written, "dob = 1979-05-27T07:32:00-08:00") orelse return error.TestUnexpectedResult;
+    const name_pos = std.mem.indexOf(u8, written, "name = \"Lance Uppercut\"") orelse return error.TestUnexpectedResult;
+    const db_connection_pos = std.mem.indexOf(u8, written, "connection_max = 5000") orelse return error.TestUnexpectedResult;
+    const db_server_pos = std.mem.indexOf(u8, written, "server = \"192.168.1.1\"") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(owner_pos < dob_pos);
+    try std.testing.expect(dob_pos < name_pos);
+    try std.testing.expect(db_connection_pos < db_server_pos);
+    try expectReparseMatches(gpa, root, written);
+}
+
+test "profile: compact keeps nested array-table ancestry on corpus fixture" {
+    const gpa = std.testing.allocator;
+    const src = try support.readTestFile(gpa, "test/valid/table/array-table-array.toml");
+    defer gpa.free(src);
+
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    const written = try writeProfileOwned(gpa, .{ .table = root }, .compact, null);
+    defer gpa.free(written);
+
+    try std.testing.expect(std.mem.indexOf(u8, written, "[[a]]") != null);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, written, "[[a.b]]"));
+    try std.testing.expect(std.mem.indexOf(u8, written, "[a.b.c]") == null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "c = {d = \"val0\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "c = {d = \"val1\"}") != null);
+    try expectReparseMatches(gpa, root, written);
+}
+
+test "profile: preserve honors captured string styles" {
+    const gpa = std.testing.allocator;
+    const src = "note = '''\nline one\nline two\n'''\n";
+
+    var string_styles: toml.HintMap(toml.StringStyle) = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{ .string_styles = &string_styles, .document = &document };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    var preserve_buf: [256]u8 = undefined;
+    var preserve_writer = std.Io.Writer.fixed(&preserve_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &preserve_writer, .preserve, &hints, gpa);
+    try std.testing.expectEqualStrings(src, preserve_writer.buffered());
 }
 
 test "formatter: prefer_headers round-trips correctly" {
@@ -871,6 +899,12 @@ fn expectFaithfulExactRoundtrip(gpa: std.mem.Allocator, src: []const u8) !void {
     try std.testing.expectEqualStrings(src, w.buffered());
 }
 
+fn expectFaithfulExactRoundtripFixture(gpa: std.mem.Allocator, path: []const u8) !void {
+    const src = try support.readTestFile(gpa, path);
+    defer gpa.free(src);
+    try expectFaithfulExactRoundtrip(gpa, src);
+}
+
 test "profile: faithful exact roundtrip comment fixture everywhere" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -883,10 +917,85 @@ test "profile: faithful exact roundtrip comment fixture without eol" {
     try expectFaithfulExactRoundtrip(arena.allocator(), @embedFile("valid/comment/noeol.toml"));
 }
 
+test "profile: faithful exact roundtrip extra comment fixtures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const fixtures = [_][]const u8{
+        "test/valid/comment/at-eof.toml",
+        "test/valid/comment/at-eof2.toml",
+        "test/valid/comment/after-literal-no-ws.toml",
+        "test/valid/comment/nonascii.toml",
+    };
+
+    for (fixtures) |fixture| try expectFaithfulExactRoundtripFixture(gpa, fixture);
+}
+
 test "profile: faithful exact roundtrip quoted dotted keys fixture" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     try expectFaithfulExactRoundtrip(arena.allocator(), @embedFile("valid/key/quoted-dots.toml"));
+}
+
+test "writeToml: layout corpus fixtures normalize safely" {
+    const gpa = std.testing.allocator;
+    const fixtures = [_][]const u8{
+        "test/valid/table/no-eol-01.toml",
+        "test/valid/table/no-eol-02.toml",
+        "test/valid/table/whitespace.toml",
+    };
+
+    for (fixtures) |fixture| {
+        const src = try support.readTestFile(gpa, fixture);
+        defer gpa.free(src);
+        try roundtrip(gpa, src);
+    }
+}
+
+test "writeToml: without-super-with-values normalizes to parent-first headers" {
+    const gpa = std.testing.allocator;
+    const src = try support.readTestFile(gpa, "test/valid/table/without-super-with-values.toml");
+    defer gpa.free(src);
+
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    try toml.writeToml(.{ .table = root }, &out.writer);
+    const written = try out.toOwnedSlice();
+    defer gpa.free(written);
+
+    try std.testing.expect(!std.mem.eql(u8, src, written));
+    try std.testing.expect(std.mem.indexOf(u8, written, "[x]\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "[x.y.z.w]\n") == null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "c = 3\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "d = 4\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "a = 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "b = 2") != null);
+    try expectReparseMatches(gpa, root, written);
+}
+
+test "writeToml: array-within-dotted expands dotted member into explicit table header" {
+    const gpa = std.testing.allocator;
+    const src = try support.readTestFile(gpa, "test/valid/table/array-within-dotted.toml");
+    defer gpa.free(src);
+
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    try toml.writeToml(.{ .table = root }, &out.writer);
+    const written = try out.toOwnedSlice();
+    defer gpa.free(written);
+
+    try std.testing.expect(std.mem.indexOf(u8, written, "apple.color = \"red\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "[fruit.apple]\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "color = \"red\"\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, written, "[[fruit.apple.seeds]]\n") != null);
+    try expectReparseMatches(gpa, root, written);
 }
 
 test "profile: faithful does not replay stale source after mutation" {

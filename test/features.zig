@@ -329,6 +329,33 @@ test "rewriteValueAtPathOpts: table replacement can expand to headers" {
     );
 }
 
+test "rewriteValueAtPathOpts: header rewrite preserves existing quoted key lexeme" {
+    const gpa = std.testing.allocator;
+    const src = "\"a.b\" = 1\n";
+
+    const replacement = try gpa.create(toml.Table);
+    replacement.* = .empty;
+    defer toml.deinit(replacement, gpa);
+
+    try replacement.put(gpa, try gpa.dupe(u8, "enabled"), .{ .boolean = true });
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{.{ .key = "a.b" }},
+        .{ .table = replacement },
+        &w,
+        .{ .prefer_headers = true },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "[\"a.b\"]\nenabled = true\n",
+        w.buffered(),
+    );
+}
+
 test "setValueAtPath: inserts missing root key before first header" {
     const gpa = std.testing.allocator;
     const src = "[group]\nvalue = 1\n";
@@ -398,6 +425,26 @@ test "setValueAtPathOpts: creates nested path with header syntax" {
     try std.testing.expectEqualStrings("[group]\nname = \"demo\"\n[group.child]\nport = 80\n", w.buffered());
 }
 
+test "setValueAtPathOpts: header fragment does not take ownership of caller value" {
+    const gpa = std.testing.allocator;
+    const src = "[group]\nname = \"demo\"\n";
+    const owned = try gpa.dupe(u8, "service");
+    defer gpa.free(owned);
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "group" }, .{ .key = "child" }, .{ .key = "name" } },
+        .{ .string = owned },
+        &w,
+        .{ .write = .{ .prefer_headers = true } },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings("[group]\nname = \"demo\"\n[group.child]\nname = \"service\"\n", w.buffered());
+}
+
 test "setValueAtPathOpts: creates child table under indexed aot element" {
     const gpa = std.testing.allocator;
     const src = "[[products]]\nname = \"Hammer\"\n[[products]]\nname = \"Nail\"\n";
@@ -425,6 +472,27 @@ test "setValueAtPathOpts: creates child table under indexed aot element" {
     );
 }
 
+test "setValueAtPathOpts: preserves quoted and escaped parent lexemes on header create" {
+    const gpa = std.testing.allocator;
+    const src = "[\"a.b\".\"\\u00c0\"]\nname = 1\n";
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.setValueAtPathOpts(
+        src,
+        &[_]toml.PathSegment{ .{ .key = "a.b" }, .{ .key = "À" }, .{ .key = "child" }, .{ .key = "port" } },
+        .{ .integer = .{ .value = 80 } },
+        &w,
+        .{ .write = .{ .prefer_headers = true } },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "[\"a.b\".\"\\u00c0\"]\nname = 1\n[\"a.b\".\"\\u00c0\".child]\nport = 80\n",
+        w.buffered(),
+    );
+}
+
 test "rewriteValues: applies operations sequentially" {
     const gpa = std.testing.allocator;
     const src = "[group]\nvalue = 1\n";
@@ -447,6 +515,36 @@ test "rewriteValues: applies operations sequentially" {
 
     try std.testing.expectEqualStrings(
         "answer = 42\n[group]\nvalue = 2\n[group.details]\nport = 8080\n",
+        w.buffered(),
+    );
+}
+
+test "rewriteValues: preserves quoted and escaped path lexemes across batch rewrite" {
+    const gpa = std.testing.allocator;
+    const src = "\"a.b\" = 1\n[\"x.y\".\"\\u00c0\"]\nname = \"old\"\n";
+
+    const replacement = try gpa.create(toml.Table);
+    replacement.* = .empty;
+    defer toml.deinit(replacement, gpa);
+    try replacement.put(gpa, try gpa.dupe(u8, "enabled"), .{ .boolean = true });
+
+    const operations = [_]toml.RewriteOperation{
+        .{ .path = &[_]toml.PathSegment{.{ .key = "a.b" }}, .value = .{ .table = replacement } },
+        .{ .path = &[_]toml.PathSegment{ .{ .key = "x.y" }, .{ .key = "À" }, .{ .key = "child" }, .{ .key = "port" } }, .value = .{ .integer = .{ .value = 80 } } },
+    };
+
+    var out_buf: [512]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.rewriteValues(
+        src,
+        &operations,
+        &w,
+        .{ .mode = .create_or_replace, .write = .{ .prefer_headers = true } },
+        gpa,
+    );
+
+    try std.testing.expectEqualStrings(
+        "[\"a.b\"]\nenabled = true\n[\"x.y\".\"\\u00c0\"]\nname = \"old\"\n[\"x.y\".\"\\u00c0\".child]\nport = 80\n",
         w.buffered(),
     );
 }

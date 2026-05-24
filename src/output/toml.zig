@@ -758,10 +758,12 @@ fn buildHintPath(
 ) hints_mod.HintPath {
     var len: usize = 0;
     for (parent_path) |segment| {
+        std.debug.assert(len < buf.len);
         buf[len] = .{ .key = segment };
         len += 1;
     }
     if (key) |segment| {
+        std.debug.assert(len < buf.len);
         buf[len] = .{ .key = segment };
         len += 1;
     }
@@ -831,6 +833,41 @@ fn writeKV(
     try writeNewline(w, hints);
 }
 
+fn writeChildTableBody(
+    w: *std.Io.Writer,
+    child_path: [][]const u8,
+    child_table: *Table,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    comment_state: ?*CommentCursorState,
+    original_root: ?*const Table,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    var child_path_buf: [129]hints_mod.PathSegment = undefined;
+    const child_syntax = findTableSyntax(hints, buildHintPath(&child_path_buf, child_path, null));
+    if (child_syntax != .dotted) {
+        try writeNewline(w, hints);
+    }
+    try writeTableInner(w, child_table, child_path, true, opts, hints, comment_state, original_root, gpa);
+}
+
+fn writeAotBodies(
+    w: *std.Io.Writer,
+    aot_path: [][]const u8,
+    arr: *types.Array,
+    opts: WriteOptions,
+    hints: ?*hints_mod.FormatHints,
+    comment_state: ?*CommentCursorState,
+    original_root: ?*const Table,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    for (arr.items) |item| {
+        try writeNewline(w, hints);
+        try writeHeaderWithComments(w, aot_path, true, hints, comment_state, gpa);
+        try writeTableInner(w, item.table, aot_path, false, opts, hints, comment_state, original_root, gpa);
+    }
+}
+
 /// Write the contents of `tbl`. When `header` is true and `path` is
 /// non-empty, emit `[path]` before content. AOT element content is
 /// written with `header = false` (already in context from `[[header]]`).
@@ -878,12 +915,7 @@ fn writeTableInner(
             @memcpy(path_buf[0..path.len], path);
             path_buf[path.len] = kv.key;
             const child_path = path_buf[0 .. path.len + 1];
-            var child_path_buf: [129]hints_mod.PathSegment = undefined;
-            const child_syntax = findTableSyntax(hints, buildHintPath(&child_path_buf, child_path, null));
-            if (child_syntax != .dotted) {
-                try writeNewline(w, hints);
-            }
-            try writeTableInner(w, kv.val.table, child_path, true, opts, hints, comment_state, original_root, gpa);
+            try writeChildTableBody(w, child_path, kv.val.table, opts, hints, comment_state, original_root, gpa);
         }
     }
 
@@ -893,12 +925,7 @@ fn writeTableInner(
             @memcpy(path_buf[0..path.len], path);
             path_buf[path.len] = kv.key;
             const aot_path = path_buf[0 .. path.len + 1];
-            const arr = kv.val.array;
-            for (arr.items) |item| {
-                try writeNewline(w, hints);
-                try writeHeaderWithComments(w, aot_path, true, hints, comment_state, gpa);
-                try writeTableInner(w, item.table, aot_path, false, opts, hints, comment_state, original_root, gpa);
-            }
+            try writeAotBodies(w, aot_path, kv.val.array, opts, hints, comment_state, original_root, gpa);
         }
     }
 }
@@ -945,12 +972,7 @@ fn writePreserveOrder(
                 @memcpy(path_buf[0..path.len], path);
                 path_buf[path.len] = kv.key;
                 const child_path = path_buf[0 .. path.len + 1];
-                var child_path_buf: [129]hints_mod.PathSegment = undefined;
-                const child_syntax = findTableSyntax(hints, buildHintPath(&child_path_buf, child_path, null));
-                if (child_syntax != .dotted) {
-                    try writeNewline(w, hints);
-                }
-                try writeTableInner(w, kv.val.table, child_path, true, opts, hints, comment_state, original_root, gpa);
+                try writeChildTableBody(w, child_path, kv.val.table, opts, hints, comment_state, original_root, gpa);
                 use_dotted = path.len > 0;
                 needs_blank_before_dotted = path.len > 0;
             },
@@ -959,12 +981,7 @@ fn writePreserveOrder(
                 @memcpy(path_buf[0..path.len], path);
                 path_buf[path.len] = kv.key;
                 const aot_path = path_buf[0 .. path.len + 1];
-                const arr = kv.val.array;
-                for (arr.items) |item| {
-                    try writeNewline(w, hints);
-                    try writeHeaderWithComments(w, aot_path, true, hints, comment_state, gpa);
-                    try writeTableInner(w, item.table, aot_path, false, opts, hints, comment_state, original_root, gpa);
-                }
+                try writeAotBodies(w, aot_path, kv.val.array, opts, hints, comment_state, original_root, gpa);
                 use_dotted = path.len > 0;
                 needs_blank_before_dotted = path.len > 0;
             },

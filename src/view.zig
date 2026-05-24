@@ -19,6 +19,28 @@ pub const TableView = std.array_hash_map.String(ValueView);
 
 pub const ArrayListView = std.ArrayList(ValueView);
 
+fn deinitOwnedValue(value: *types.Value, gpa: std.mem.Allocator) void {
+    switch (value.*) {
+        .string => |s| gpa.free(s),
+        .array => |arr| {
+            for (arr.items) |*item| deinitOwnedValue(item, gpa);
+            arr.deinit(gpa);
+            gpa.destroy(arr);
+        },
+        .table => |tbl| {
+            deinitOwnedTable(tbl, gpa);
+            gpa.destroy(tbl);
+        },
+        else => {},
+    }
+}
+
+fn deinitOwnedTable(tbl: *types.Table, gpa: std.mem.Allocator) void {
+    for (tbl.keys()) |key| gpa.free(key);
+    for (tbl.values()) |*value| deinitOwnedValue(value, gpa);
+    tbl.deinit(gpa);
+}
+
 /// Free container structs and table keys. String values that point
 /// outside `input` are owned allocations (from escaped-string slow
 /// path) and are freed too. Strings pointing into `input` are
@@ -72,15 +94,7 @@ pub fn cloneValue(gpa: std.mem.Allocator, view: ValueView, input: []const u8) st
             new_arr.* = .empty;
             errdefer {
                 for (new_arr.items) |*item| {
-                    switch (item.*) {
-                        .string => |s| gpa.free(s),
-                        .array => |a| {
-                            for (a.items) |*elem| gpa.free(elem.string);
-                            a.deinit(gpa);
-                            gpa.destroy(a);
-                        },
-                        else => {},
-                    }
+                    deinitOwnedValue(item, gpa);
                 }
                 new_arr.deinit(gpa);
                 gpa.destroy(new_arr);
@@ -95,18 +109,15 @@ pub fn cloneValue(gpa: std.mem.Allocator, view: ValueView, input: []const u8) st
             const new_tbl = try gpa.create(types.Table);
             new_tbl.* = .empty;
             errdefer {
-                for (new_tbl.keys()) |k| gpa.free(k);
-                for (new_tbl.values()) |*v| {
-                    if (v.* == .string) gpa.free(v.*.string);
-                }
-                new_tbl.deinit(gpa);
+                deinitOwnedTable(new_tbl, gpa);
                 gpa.destroy(new_tbl);
             }
             var it = tbl.iterator();
             while (it.next()) |entry| {
                 const key_owned = try gpa.dupe(u8, entry.key_ptr.*);
                 errdefer gpa.free(key_owned);
-                const val = try cloneValue(gpa, entry.value_ptr.*, input);
+                var val = try cloneValue(gpa, entry.value_ptr.*, input);
+                errdefer deinitOwnedValue(&val, gpa);
                 try new_tbl.put(gpa, key_owned, val);
             }
             return types.Value{ .table = new_tbl };

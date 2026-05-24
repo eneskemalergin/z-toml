@@ -280,11 +280,15 @@ fn rewriteOne(
     var entry_spans: EntrySpanMap = .empty;
     var header_spans: HeaderSpanMap = .empty;
     var string_styles: HintMap(StringStyle) = .empty;
+    var key_styles: KeyStyleMap = .empty;
+    var key_lexemes: KeyLexemeMap = .empty;
     var table_syntax: TableSyntaxMap = .empty;
     var value_lexemes: ValueLexemeMap = .empty;
     var document: DocumentHints = .{};
     var hints: FormatHints = .{
         .string_styles = &string_styles,
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
         .table_syntax = &table_syntax,
         .value_lexemes = &value_lexemes,
         .document = &document,
@@ -297,11 +301,12 @@ fn rewriteOne(
     defer deinit(root, gpa);
 
     var line_hints: FormatHints = .{ .document = &document };
+    const fragment_hints = if (options.preserve_existing_styles) &hints else &line_hints;
     const path_hint = HintPath{ .segments = operation.path };
 
     if (entry_spans.get(path_hint)) |entry| {
         const replacement = if (useHeaderFragment(operation.value, options.write))
-            try renderStructuredFragment(operation.path, operation.value, options.write, &line_hints, gpa)
+            try renderStructuredFragment(operation.path, operation.value, options.write, fragment_hints, gpa)
         else
             try renderReplacementValue(operation.path, operation.value, options, &hints, root, gpa);
         defer gpa.free(replacement);
@@ -333,12 +338,12 @@ fn rewriteOne(
     const fragment = blk: {
         if (relative_keys.len == 0) return error.UnsupportedRewritePath;
         if (useHeaderFragment(operation.value, options.write)) {
-            break :blk try renderStructuredFragment(operation.path, operation.value, options.write, &line_hints, gpa);
+            break :blk try renderStructuredFragment(operation.path, operation.value, options.write, fragment_hints, gpa);
         }
         if (options.write.prefer_headers and relative_keys.len > 1) {
-            break :blk try renderHeaderValueFragment(full_keys[0 .. full_keys.len - 1], full_keys[full_keys.len - 1], operation.value, options.write, &line_hints, gpa);
+            break :blk try renderHeaderValueFragment(full_keys[0 .. full_keys.len - 1], full_keys[full_keys.len - 1], operation.value, options.write, fragment_hints, gpa);
         }
-        break :blk try renderPathValueFragment(relative_keys, operation.value, options.write, &line_hints, gpa);
+        break :blk try renderPathValueFragment(relative_keys, operation.value, options.write, fragment_hints, gpa);
     };
     defer gpa.free(fragment);
 
