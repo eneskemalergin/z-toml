@@ -847,12 +847,14 @@ test "profile: faithful preserves UTF-8 BOM" {
 fn expectFaithfulExactRoundtrip(gpa: std.mem.Allocator, src: []const u8) !void {
     var styles: toml.HintMap(toml.StringStyle) = .empty;
     var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
     var table_syntax: toml.TableSyntaxMap = .empty;
     var comments: toml.CommentMap = .empty;
     var document: toml.DocumentHints = .{};
     var hints: toml.FormatHints = .{
         .string_styles = &styles,
         .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
         .table_syntax = &table_syntax,
         .comments = &comments,
         .document = &document,
@@ -896,12 +898,14 @@ test "profile: faithful does not replay stale source after mutation" {
 
     var styles: toml.HintMap(toml.StringStyle) = .empty;
     var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
     var table_syntax: toml.TableSyntaxMap = .empty;
     var comments: toml.CommentMap = .empty;
     var document: toml.DocumentHints = .{};
     var hints: toml.FormatHints = .{
         .string_styles = &styles,
         .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
         .table_syntax = &table_syntax,
         .comments = &comments,
         .document = &document,
@@ -917,6 +921,365 @@ test "profile: faithful does not replay stale source after mutation" {
     var w = std.Io.Writer.fixed(&out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
     try std.testing.expectEqualStrings("answer = 42\n", w.buffered());
+}
+
+test "profile: faithful mutation preserves dotted header origin and escaped key spelling" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/key/quoted-dots.toml");
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .string_styles = &styles,
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("plain").?.* = .{ .integer = .{ .value = 9 } };
+
+    const out_buf = try gpa.alloc(u8, src.len * 16 + 4096);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "\n[table]\n") == null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[table.withdot]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "\"escaped\\u002edot\" = 7") != null);
+}
+
+test "profile: faithful mutation preserves escaped header segments" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/key/escapes.toml");
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .string_styles = &styles,
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("\n").?.* = .{ .string = try gpa.dupe(u8, "changed") };
+
+    const out_buf = try gpa.alloc(u8, src.len * 16 + 4096);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[\"a.b\".\"\\u00c0\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[\"\\\"quoted\\\"\"]") != null);
+}
+
+test "profile: faithful mutation preserves trailing comment spacing" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/comment/everywhere.toml");
+
+    var styles: toml.HintMap(toml.StringStyle) = .empty;
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .string_styles = &styles,
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("group").?.table.getPtr("answer").?.* = .{ .integer = .{ .value = 77 } };
+
+    const out_buf = try gpa.alloc(u8, src.len * 16 + 4096);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "  # Top comment.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[group] # Comment") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "answer = 77 # Comment") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "dt = 1979-05-27T07:32:12-07:00  # c") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[[aot]]# Comment") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "k = 99# Comment") != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, w.buffered(), "more ="));
+}
+
+test "profile: faithful mutation preserves float lexemes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/float/exponent.toml");
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var value_lexemes: toml.ValueLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .value_lexemes = &value_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("lower").?.* = .{ .float = 301.0 };
+
+    const out_buf = try gpa.alloc(u8, src.len * 8 + 1024);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "upper = 3E2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "pos = 3E+2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "pointupper = 3.1E2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "minustenth = -1E-1") != null);
+}
+
+test "profile: faithful mutation preserves float underscore lexemes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/float/underscore.toml");
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var value_lexemes: toml.ValueLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .value_lexemes = &value_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("before").?.* = .{ .float = 1.0 };
+
+    const out_buf = try gpa.alloc(u8, src.len * 8 + 1024);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "after = 3141.592_7") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "exponent = 3e1_4") != null);
+}
+
+test "profile: faithful mutation preserves special float lexemes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/float/inf-and-nan.toml");
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var value_lexemes: toml.ValueLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .value_lexemes = &value_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("nan").?.* = .{ .float = 0.0 };
+
+    const out_buf = try gpa.alloc(u8, src.len * 8 + 1024);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "nan_plus = +nan") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "infinity_plus = +inf") != null);
+}
+
+test "profile: faithful mutation preserves datetime lexemes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/datetime/no-seconds.toml");
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var value_lexemes: toml.ValueLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .value_lexemes = &value_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("without-seconds-1").?.* = .{ .local_time = .{ .hour = 1, .minute = 2, .second = 3, .nanosecond = 0 } };
+
+    const out_buf = try gpa.alloc(u8, src.len * 8 + 1024);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "without-seconds-2 = 1979-05-27 07:32Z") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "without-seconds-3 = 1979-05-27 07:32-07:00") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "without-seconds-4 = 1979-05-27T07:32") != null);
+}
+
+test "profile: faithful mutation preserves datetime fractional lexemes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/datetime/milliseconds.toml");
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var value_lexemes: toml.ValueLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .value_lexemes = &value_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("utc1").?.* = .{ .offset_datetime = .{
+        .date = .{ .year = 2000, .month = 1, .day = 2 },
+        .time = .{ .hour = 3, .minute = 4, .second = 5, .nanosecond = 0 },
+        .offset_minutes = 0,
+    } };
+
+    const out_buf = try gpa.alloc(u8, src.len * 8 + 1024);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "1987-07-05T17:45:56.6Z") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "1987-07-05T17:45:56.6+08:00") != null);
+}
+
+test "profile: faithful mutation ignores internal comment trivia without duplicating keys" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const src = @embedFile("valid/comment/tricky.toml");
+
+    var key_styles: toml.KeyStyleMap = .empty;
+    var key_lexemes: toml.KeyLexemeMap = .empty;
+    var value_lexemes: toml.ValueLexemeMap = .empty;
+    var table_syntax: toml.TableSyntaxMap = .empty;
+    var comments: toml.CommentMap = .empty;
+    var document: toml.DocumentHints = .{};
+    var hints: toml.FormatHints = .{
+        .key_styles = &key_styles,
+        .key_lexemes = &key_lexemes,
+        .value_lexemes = &value_lexemes,
+        .table_syntax = &table_syntax,
+        .comments = &comments,
+        .document = &document,
+    };
+    defer hints.deinit(gpa);
+
+    const root = try toml.parseSliceWithHints(gpa, src, null, &hints);
+    defer toml.deinit(root, gpa);
+
+    root.getPtr("section").?.table.getPtr("8").?.* = .{ .string = try gpa.dupe(u8, "changed") };
+
+    const out_buf = try gpa.alloc(u8, src.len * 8 + 4096);
+    defer gpa.free(out_buf);
+    var w = std.Io.Writer.fixed(out_buf);
+    try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
+
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[section]#attached comment") != null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, w.buffered(), "arr4 ="));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, w.buffered(), "arr5 ="));
+}
+
+test "writeToml: basic quoted key escapes control characters" {
+    const gpa = std.testing.allocator;
+    const src = "\"\\n\" = 1\n";
+    const root = try toml.parseSlice(gpa, src, null);
+    defer toml.deinit(root, gpa);
+
+    var out_buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&out_buf);
+    try toml.writeToml(.{ .table = root }, &w);
+    try std.testing.expectEqualStrings(src, w.buffered());
 }
 
 // ─── Phase 6 test coverage ─────────────────────────────────────────────────────

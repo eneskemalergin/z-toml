@@ -112,6 +112,7 @@ pub const CommentAttachment = enum(u3) {
 pub const CommentRecord = struct {
     attachment: CommentAttachment,
     text: []const u8,
+    raw: ?[]const u8 = null,
 };
 
 pub const CommentList = std.ArrayListUnmanaged(CommentRecord);
@@ -121,12 +122,16 @@ pub fn HintMap(comptime V: type) type {
 }
 
 pub const KeyStyleMap = HintMap(KeyStyle);
+pub const KeyLexemeMap = HintMap([]const u8);
+pub const ValueLexemeMap = HintMap([]const u8);
 pub const TableSyntaxMap = HintMap(TableSyntax);
 pub const CommentMap = HintMap(CommentList);
 
 pub const FormatHints = struct {
     string_styles: ?*HintMap(StringStyle) = null,
     key_styles: ?*KeyStyleMap = null,
+    key_lexemes: ?*KeyLexemeMap = null,
+    value_lexemes: ?*ValueLexemeMap = null,
     table_syntax: ?*TableSyntaxMap = null,
     comments: ?*CommentMap = null,
     document: ?*DocumentHints = null,
@@ -141,6 +146,22 @@ pub const FormatHints = struct {
             var it = styles.iterator();
             while (it.next()) |entry| entry.key_ptr.deinit(gpa);
             styles.deinit(gpa);
+        }
+        if (self.key_lexemes) |lexemes| {
+            var it = lexemes.iterator();
+            while (it.next()) |entry| {
+                entry.key_ptr.deinit(gpa);
+                gpa.free(entry.value_ptr.*);
+            }
+            lexemes.deinit(gpa);
+        }
+        if (self.value_lexemes) |lexemes| {
+            var it = lexemes.iterator();
+            while (it.next()) |entry| {
+                entry.key_ptr.deinit(gpa);
+                gpa.free(entry.value_ptr.*);
+            }
+            lexemes.deinit(gpa);
         }
         if (self.table_syntax) |syntax| {
             var it = syntax.iterator();

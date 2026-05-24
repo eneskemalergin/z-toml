@@ -78,6 +78,71 @@ fn tryWriteOriginalFaithfulSource(
     return true;
 }
 
+fn lookupOriginalValue(root: *const Table, path: hints_mod.HintPath) ?Value {
+    if (path.segments.len == 0) return null;
+
+    var current_table: ?*const Table = root;
+    var current_value: ?Value = null;
+
+    for (path.segments, 0..) |segment, index| {
+        const is_last = index + 1 == path.segments.len;
+        switch (segment) {
+            .key => |key| {
+                const value = if (current_value) |active| switch (active) {
+                    .table => |tbl| tbl.get(key),
+                    else => null,
+                } else if (current_table) |tbl|
+                    tbl.get(key)
+                else
+                    null;
+
+                const resolved = value orelse return null;
+                if (is_last) return resolved;
+                current_value = resolved;
+                current_table = switch (resolved) {
+                    .table => |tbl| tbl,
+                    else => null,
+                };
+            },
+            .index => |item_index| {
+                const active = current_value orelse return null;
+                const arr = switch (active) {
+                    .array => |items| items,
+                    else => return null,
+                };
+                if (item_index >= arr.items.len) return null;
+                const resolved = arr.items[item_index];
+                if (is_last) return resolved;
+                current_value = resolved;
+                current_table = switch (resolved) {
+                    .table => |tbl| tbl,
+                    else => null,
+                };
+            },
+        }
+    }
+
+    return null;
+}
+
+fn tryWritePreservedScalarLexeme(
+    w: *std.Io.Writer,
+    val: Value,
+    hints: ?*hints_mod.FormatHints,
+    key_path: ?hints_mod.HintPath,
+    original_root: ?*const Table,
+) std.Io.Writer.Error!bool {
+    const path = key_path orelse return false;
+    const root = original_root orelse return false;
+    const h = hints orelse return false;
+    const value_lexemes = h.value_lexemes orelse return false;
+    const raw = value_lexemes.get(path) orelse return false;
+    const original_val = lookupOriginalValue(root, path) orelse return false;
+    if (!valuesEqual(val, original_val)) return false;
+    try w.writeAll(raw);
+    return true;
+}
+
 /// Options controlling writeToml output formatting.
 pub const WriteOptions = struct {
     /// Sort keys alphabetically within each table (canonical order).
@@ -119,11 +184,28 @@ fn writeNewline(w: *std.Io.Writer, hints: ?*hints_mod.FormatHints) std.Io.Writer
 
 fn writeBasicQuotedKey(w: *std.Io.Writer, key: []const u8) std.Io.Writer.Error!void {
     try w.writeByte('"');
-    for (key) |c| switch (c) {
-        '"' => try w.writeAll("\\\""),
-        '\\' => try w.writeAll("\\\\"),
-        else => try w.writeByte(c),
-    };
+    var start: usize = 0;
+    for (key, 0..) |c, i| {
+        if (!needsEscape(c)) continue;
+        if (i > start) try w.writeAll(key[start..i]);
+        switch (c) {
+            '"' => try w.writeAll("\\\""),
+            '\\' => try w.writeAll("\\\\"),
+            0x08 => try w.writeAll("\\b"),
+            '\t' => try w.writeAll("\\t"),
+            '\n' => try w.writeAll("\\n"),
+            0x0C => try w.writeAll("\\f"),
+            '\r' => try w.writeAll("\\r"),
+            0x1B => try w.writeAll("\\u001B"),
+            0...7, 0xB, 0xE...0x1A, 0x1C...0x1F, 0x7F => {
+                try w.writeAll("\\u00");
+                try w.print("{X:0>2}", .{c});
+            },
+            else => unreachable,
+        }
+        start = i + 1;
+    }
+    if (start < key.len) try w.writeAll(key[start..]);
     try w.writeByte('"');
 }
 
@@ -145,10 +227,25 @@ fn writeQuotedWithStyle(
     };
 
     if (isBareKey(key)) return w.writeAll(key);
-    if (std.mem.indexOfScalar(u8, key, '\'') == null) {
+    const requires_basic = for (key) |c| {
+        if (needsEscape(c)) break true;
+    } else false;
+    if (!requires_basic and std.mem.indexOfScalar(u8, key, '\'') == null) {
         return writeLiteralQuotedKey(w, key);
     }
     return writeBasicQuotedKey(w, key);
+}
+
+fn writeQuotedWithHints(
+    w: *std.Io.Writer,
+    key: []const u8,
+    hints: ?*hints_mod.FormatHints,
+    path: hints_mod.HintPath,
+) std.Io.Writer.Error!void {
+    if (hints) |h| if (h.key_lexemes) |key_lexemes| {
+        if (key_lexemes.get(path)) |raw| return w.writeAll(raw);
+    };
+    return writeQuotedWithStyle(w, key, findKeyStyle(hints, path));
 }
 
 fn findKeyStyle(hints: ?*hints_mod.FormatHints, path: hints_mod.HintPath) ?hints_mod.KeyStyle {
@@ -177,7 +274,7 @@ fn writeDottedPrefix(
     for (path, 0..) |part, i| {
         if (i > 0) try w.writeByte('.');
         prefix_buf[i] = .{ .key = part };
-        try writeQuotedWithStyle(w, part, findKeyStyle(hints, .{ .segments = prefix_buf[0 .. i + 1] }));
+        try writeQuotedWithHints(w, part, hints, .{ .segments = prefix_buf[0 .. i + 1] });
     }
 }
 
@@ -326,7 +423,15 @@ fn writeValue(
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
     key_path: ?hints_mod.HintPath,
-) std.Io.Writer.Error!void {
+    original_root: ?*const Table,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    switch (val) {
+        .float, .offset_datetime, .local_datetime, .local_date, .local_time => {
+            if (try tryWritePreservedScalarLexeme(w, val, hints, key_path, original_root)) return;
+        },
+        else => {},
+    }
+
     switch (val) {
         .string => |s| {
             if (hints) |h| if (h.string_styles) |styles| if (key_path) |kp| {
@@ -397,9 +502,9 @@ fn writeValue(
                 if (key_path) |kp| {
                     var child_path_buf: [129]hints_mod.PathSegment = undefined;
                     const child_path = extendHintPath(&child_path_buf, kp, .{ .index = i });
-                    try writeValue(w, item, opts, hints, child_path);
+                    try writeValue(w, item, opts, hints, child_path, original_root);
                 } else {
-                    try writeValue(w, item, opts, hints, null);
+                    try writeValue(w, item, opts, hints, null, original_root);
                 }
             }
             try w.writeByte(']');
@@ -420,13 +525,13 @@ fn writeValue(
                 if (key_path) |kp| {
                     var child_path_buf: [129]hints_mod.PathSegment = undefined;
                     const child_path = extendHintPath(&child_path_buf, kp, .{ .key = entry.key_ptr.* });
-                    try writeQuotedWithStyle(w, entry.key_ptr.*, findKeyStyle(hints, child_path));
+                    try writeQuotedWithHints(w, entry.key_ptr.*, hints, child_path);
                     try w.writeAll(" = ");
-                    try writeValue(w, entry.value_ptr.*, opts, hints, child_path);
+                    try writeValue(w, entry.value_ptr.*, opts, hints, child_path, original_root);
                 } else {
                     try writeQuotedWithStyle(w, entry.key_ptr.*, null);
                     try w.writeAll(" = ");
-                    try writeValue(w, entry.value_ptr.*, opts, hints, null);
+                    try writeValue(w, entry.value_ptr.*, opts, hints, null, original_root);
                 }
             }
             if (inline_spaced and !first) try w.writeByte(' ');
@@ -516,30 +621,89 @@ fn kvsOf(
 
 // ─── Core serialization ────────────────────────────────────────────────────────
 
-fn writeStoredComment(w: *std.Io.Writer, text: []const u8) std.Io.Writer.Error!void {
+const CommentCursorMap = hints_mod.HintMap(usize);
+
+const CommentCursorState = struct {
+    positions: CommentCursorMap = .empty,
+
+    fn deinit(self: *CommentCursorState, gpa: Allocator) void {
+        var it = self.positions.iterator();
+        while (it.next()) |entry| entry.key_ptr.deinit(gpa);
+        self.positions.deinit(gpa);
+    }
+
+    fn cursorForPath(self: *CommentCursorState, gpa: Allocator, path: hints_mod.HintPath) !*usize {
+        if (self.positions.getPtr(path)) |cursor| return cursor;
+
+        var owned = try path.clone(gpa);
+        errdefer owned.deinit(gpa);
+        try self.positions.put(gpa, owned, 0);
+        return self.positions.getPtr(path).?;
+    }
+};
+
+fn writeStoredComment(w: *std.Io.Writer, comment: hints_mod.CommentRecord) std.Io.Writer.Error!void {
+    if (comment.raw) |raw| {
+        try w.writeAll(raw);
+        return;
+    }
     try w.writeAll("# ");
-    try w.writeAll(text);
+    try w.writeAll(comment.text);
+}
+
+fn writeTrailingComment(w: *std.Io.Writer, comment: hints_mod.CommentRecord) std.Io.Writer.Error!void {
+    if (comment.raw) |raw| {
+        try w.writeAll(raw);
+        return;
+    }
+    try w.writeAll(" # ");
+    try w.writeAll(comment.text);
 }
 
 fn emitComments(
     w: *std.Io.Writer,
+    path: hints_mod.HintPath,
     comments: hints_mod.CommentList,
     attachment: hints_mod.CommentAttachment,
     hints: ?*hints_mod.FormatHints,
-) std.Io.Writer.Error!void {
-    for (comments.items) |comment| {
-        if (comment.attachment != attachment) continue;
-        try writeStoredComment(w, comment.text);
+    comment_state: ?*CommentCursorState,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
+    var start_index: usize = 0;
+    var cursor: ?*usize = null;
+    if (comment_state) |state| {
+        cursor = try state.cursorForPath(gpa, path);
+        start_index = cursor.?.*;
+    }
+
+    var index = start_index;
+    while (index < comments.items.len and comments.items[index].attachment == attachment) : (index += 1) {
+        const comment = comments.items[index];
+        try writeStoredComment(w, comment);
         try writeNewline(w, hints);
     }
+    if (cursor) |value| value.* = index;
 }
 
 fn findComment(
+    gpa: Allocator,
+    path: hints_mod.HintPath,
     comments: hints_mod.CommentList,
     attachment: hints_mod.CommentAttachment,
-) ?[]const u8 {
+    comment_state: ?*CommentCursorState,
+) Allocator.Error!?hints_mod.CommentRecord {
+    if (comment_state) |state| {
+        const cursor = try state.cursorForPath(gpa, path);
+        if (cursor.* < comments.items.len and comments.items[cursor.*].attachment == attachment) {
+            const comment = comments.items[cursor.*];
+            cursor.* += 1;
+            return comment;
+        }
+        return null;
+    }
+
     for (comments.items) |comment| {
-        if (comment.attachment == attachment) return comment.text;
+        if (comment.attachment == attachment) return comment;
     }
     return null;
 }
@@ -566,15 +730,17 @@ fn writeHeaderWithComments(
     path: [][]const u8,
     is_aot: bool,
     hints: ?*hints_mod.FormatHints,
-) std.Io.Writer.Error!void {
+    comment_state: ?*CommentCursorState,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
     var header_path_buf: [128]hints_mod.PathSegment = undefined;
     const header_path = buildHintPath(&header_path_buf, path, null);
-    var trailing_comment: ?[]const u8 = null;
+    var trailing_comment: ?hints_mod.CommentRecord = null;
 
     if (hints) |h| if (h.comments) |comments| {
         if (comments.get(header_path)) |records| {
-            try emitComments(w, records, if (is_aot) .before_aot else .before_table, hints);
-            trailing_comment = findComment(records, if (is_aot) .trailing_aot else .trailing_table);
+            try emitComments(w, header_path, records, if (is_aot) .before_aot else .before_table, hints, comment_state, gpa);
+            trailing_comment = try findComment(gpa, header_path, records, if (is_aot) .trailing_aot else .trailing_table, comment_state);
         }
     };
 
@@ -588,8 +754,7 @@ fn writeHeaderWithComments(
         try w.writeByte(']');
     }
     if (trailing_comment) |comment| {
-        try w.writeAll(" # ");
-        try w.writeAll(comment);
+        try writeTrailingComment(w, comment);
     }
     try writeNewline(w, hints);
 }
@@ -601,22 +766,24 @@ fn writeKV(
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
     parent_path: [][]const u8,
-) std.Io.Writer.Error!void {
+    comment_state: ?*CommentCursorState,
+    original_root: ?*const Table,
+    gpa: Allocator,
+) (std.Io.Writer.Error || Allocator.Error)!void {
     var full_path_buf: [129]hints_mod.PathSegment = undefined;
     const full_path = buildHintPath(&full_path_buf, parent_path, key);
-    var trailing_comment: ?[]const u8 = null;
+    var trailing_comment: ?hints_mod.CommentRecord = null;
     if (hints) |h| if (h.comments) |comments| {
         if (comments.get(full_path)) |records| {
-            try emitComments(w, records, .before_entry, hints);
-            trailing_comment = findComment(records, .trailing_entry);
+            try emitComments(w, full_path, records, .before_entry, hints, comment_state, gpa);
+            trailing_comment = try findComment(gpa, full_path, records, .trailing_entry, comment_state);
         }
     };
-    try writeQuotedWithStyle(w, key, findKeyStyle(hints, full_path));
+    try writeQuotedWithHints(w, key, hints, full_path);
     try w.writeAll(" = ");
-    try writeValue(w, val, opts, hints, full_path);
+    try writeValue(w, val, opts, hints, full_path, original_root);
     if (trailing_comment) |comment| {
-        try w.writeAll(" # ");
-        try w.writeAll(comment);
+        try writeTrailingComment(w, comment);
     }
     try writeNewline(w, hints);
 }
@@ -631,25 +798,33 @@ fn writeTableInner(
     emit_header: bool,
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
+    comment_state: ?*CommentCursorState,
+    original_root: ?*const Table,
     gpa: Allocator,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
     var path_buf: [128][]const u8 = undefined;
     const kvs = try kvsOf(tbl, path, opts, hints, gpa);
     defer if (kvs.len > 0) gpa.free(kvs);
 
-    if (emit_header and path.len > 0) {
-        try writeHeaderWithComments(w, path, false, hints);
+    var table_path_buf: [128]hints_mod.PathSegment = undefined;
+    const table_syntax = if (path.len > 0)
+        findTableSyntax(hints, buildHintPath(&table_path_buf, path, null))
+    else
+        null;
+
+    if (emit_header and path.len > 0 and table_syntax != .dotted) {
+        try writeHeaderWithComments(w, path, false, hints, comment_state, gpa);
     }
 
     if (opts.preserve_order) {
-        try writePreserveOrder(w, tbl, kvs, path, &path_buf, opts, hints, gpa);
+        try writePreserveOrder(w, tbl, kvs, path, &path_buf, opts, hints, comment_state, original_root, gpa);
         return;
     }
 
     // Three-pass dispatch: scalars first so they appear before table headers.
     for (kvs) |kv| {
         switch (kv.kind) {
-            .plain, .inline_table => try writeKV(w, kv.key, kv.val, opts, hints, path),
+            .plain, .inline_table => try writeKV(w, kv.key, kv.val, opts, hints, path, comment_state, original_root, gpa),
             else => {},
         }
     }
@@ -657,11 +832,15 @@ fn writeTableInner(
     // Tables come second: each one emits a [header] and recurses.
     for (kvs) |kv| {
         if (kv.kind == .table) {
-            try writeNewline(w, hints);
             @memcpy(path_buf[0..path.len], path);
             path_buf[path.len] = kv.key;
             const child_path = path_buf[0 .. path.len + 1];
-            try writeTableInner(w, kv.val.table, child_path, true, opts, hints, gpa);
+            var child_path_buf: [129]hints_mod.PathSegment = undefined;
+            const child_syntax = findTableSyntax(hints, buildHintPath(&child_path_buf, child_path, null));
+            if (child_syntax != .dotted) {
+                try writeNewline(w, hints);
+            }
+            try writeTableInner(w, kv.val.table, child_path, true, opts, hints, comment_state, original_root, gpa);
         }
     }
 
@@ -674,8 +853,8 @@ fn writeTableInner(
             const arr = kv.val.array;
             for (arr.items) |item| {
                 try writeNewline(w, hints);
-                try writeHeaderWithComments(w, aot_path, true, hints);
-                try writeTableInner(w, item.table, aot_path, false, opts, hints, gpa);
+                try writeHeaderWithComments(w, aot_path, true, hints, comment_state, gpa);
+                try writeTableInner(w, item.table, aot_path, false, opts, hints, comment_state, original_root, gpa);
             }
         }
     }
@@ -689,35 +868,48 @@ fn writePreserveOrder(
     path_buf: *[128][]const u8,
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
+    comment_state: ?*CommentCursorState,
+    original_root: ?*const Table,
     gpa: Allocator,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
     _ = tbl;
-    var use_dotted: bool = false;
+    var table_path_buf: [128]hints_mod.PathSegment = undefined;
+    const table_is_dotted = path.len > 0 and findTableSyntax(hints, buildHintPath(&table_path_buf, path, null)) == .dotted;
+    var use_dotted = table_is_dotted;
+    var needs_blank_before_dotted = false;
     for (kvs) |kv| {
         switch (kv.kind) {
             .plain, .inline_table => {
                 if (use_dotted and path.len > 0) {
                     var full_path_buf: [129]hints_mod.PathSegment = undefined;
                     const full_path = buildHintPath(&full_path_buf, path, kv.key);
-                    try writeNewline(w, hints);
+                    if (needs_blank_before_dotted) {
+                        try writeNewline(w, hints);
+                        needs_blank_before_dotted = false;
+                    }
                     try writeDottedPrefix(w, path, hints);
                     try w.writeByte('.');
-                    try writeQuotedWithStyle(w, kv.key, findKeyStyle(hints, full_path));
+                    try writeQuotedWithHints(w, kv.key, hints, full_path);
                     try w.writeAll(" = ");
-                    try writeValue(w, kv.val, opts, hints, full_path);
+                    try writeValue(w, kv.val, opts, hints, full_path, original_root);
                     try writeNewline(w, hints);
                 } else {
-                    try writeKV(w, kv.key, kv.val, opts, hints, path);
+                    try writeKV(w, kv.key, kv.val, opts, hints, path, comment_state, original_root, gpa);
                 }
             },
             .table => {
                 use_dotted = false;
-                try writeNewline(w, hints);
                 @memcpy(path_buf[0..path.len], path);
                 path_buf[path.len] = kv.key;
                 const child_path = path_buf[0 .. path.len + 1];
-                try writeTableInner(w, kv.val.table, child_path, true, opts, hints, gpa);
+                var child_path_buf: [129]hints_mod.PathSegment = undefined;
+                const child_syntax = findTableSyntax(hints, buildHintPath(&child_path_buf, child_path, null));
+                if (child_syntax != .dotted) {
+                    try writeNewline(w, hints);
+                }
+                try writeTableInner(w, kv.val.table, child_path, true, opts, hints, comment_state, original_root, gpa);
                 use_dotted = path.len > 0;
+                needs_blank_before_dotted = path.len > 0;
             },
             .aot => {
                 use_dotted = false;
@@ -727,10 +919,11 @@ fn writePreserveOrder(
                 const arr = kv.val.array;
                 for (arr.items) |item| {
                     try writeNewline(w, hints);
-                    try writeHeaderWithComments(w, aot_path, true, hints);
-                    try writeTableInner(w, item.table, aot_path, false, opts, hints, gpa);
+                    try writeHeaderWithComments(w, aot_path, true, hints, comment_state, gpa);
+                    try writeTableInner(w, item.table, aot_path, false, opts, hints, comment_state, original_root, gpa);
                 }
                 use_dotted = path.len > 0;
+                needs_blank_before_dotted = path.len > 0;
             },
         }
     }
@@ -742,9 +935,11 @@ fn writeTable(
     path: [][]const u8,
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
+    comment_state: ?*CommentCursorState,
+    original_root: ?*const Table,
     gpa: Allocator,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
-    return writeTableInner(w, tbl, path, true, opts, hints, gpa);
+    return writeTableInner(w, tbl, path, true, opts, hints, comment_state, original_root, gpa);
 }
 
 /// Serialize `value` as TOML text to `w`. Default formatting.
@@ -769,8 +964,8 @@ pub fn writeTomlOpts(
     gpa: Allocator,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
     switch (value) {
-        .table => |tbl| try writeTable(w, tbl, &.{}, opts, null, gpa),
-        else => try writeValue(w, value, opts, null, null),
+        .table => |tbl| try writeTable(w, tbl, &.{}, opts, null, null, null, gpa),
+        else => try writeValue(w, value, opts, null, null, null),
     }
     try w.flush();
 }
@@ -796,9 +991,25 @@ pub fn writeTomlWithProfile(
         .canonical => .{ .sort_keys = true, .prefer_headers = true, .use_escape_e = true },
         .faithful => .{ .preserve_order = true, .prefer_headers = true, .use_escape_e = true },
     };
+    var comment_state: CommentCursorState = .{};
+    defer comment_state.deinit(gpa);
+    const active_comment_state = if (hints != null and hints.?.comments != null) &comment_state else null;
+    const original_root = blk: {
+        if (profile != .faithful) break :blk null;
+        const h = hints orelse break :blk null;
+        _ = h.value_lexemes orelse break :blk null;
+        const document = h.document orelse break :blk null;
+        const source = document.original_source orelse break :blk null;
+        const original = parser_mod.parseSlice(gpa, source, null) catch break :blk null;
+        break :blk original;
+    };
+    defer if (original_root) |root| {
+        parser_mod.deinitTable(root, gpa);
+        gpa.destroy(root);
+    };
     switch (value) {
-        .table => |tbl| try writeTable(w, tbl, &.{}, opts, hints, gpa),
-        else => try writeValue(w, value, opts, hints, null),
+        .table => |tbl| try writeTable(w, tbl, &.{}, opts, hints, active_comment_state, if (original_root) |root| root else null, gpa),
+        else => try writeValue(w, value, opts, hints, null, if (original_root) |root| root else null),
     }
     try w.flush();
 }

@@ -69,12 +69,20 @@ fn ParserTy(comptime V: type) type {
         const ParsedKeyPath = struct {
             parts: std.ArrayList([]u8),
             styles: std.ArrayList(hints_mod.KeyStyle),
+            raw_parts: std.ArrayList([]u8),
 
             fn deinit(self: *ParsedKeyPath, gpa: Allocator) void {
                 for (self.parts.items) |part| gpa.free(part);
+                for (self.raw_parts.items) |part| gpa.free(part);
                 self.parts.deinit(gpa);
                 self.styles.deinit(gpa);
+                self.raw_parts.deinit(gpa);
             }
+        };
+
+        const PendingComment = struct {
+            text: []const u8,
+            raw: []const u8,
         };
 
         gpa: Allocator,
@@ -90,7 +98,7 @@ fn ParserTy(comptime V: type) type {
         hints: ?*hints_mod.FormatHints,
         table_path: std.ArrayListUnmanaged([]const u8),
         current_value_path: std.ArrayListUnmanaged(hints_mod.PathSegment),
-        pending_comments: std.ArrayListUnmanaged([]const u8),
+        pending_comments: std.ArrayListUnmanaged(PendingComment),
         trailing_path: ?hints_mod.HintPath,
 
         fn init(gpa: Allocator, input: []const u8, hints: ?*hints_mod.FormatHints) Allocator.Error!Self {
@@ -240,6 +248,13 @@ fn ParserTy(comptime V: type) type {
             try styles.put(self.gpa, owned, style);
         }
 
+        fn recordScalarLexeme(self: *Self, raw: []const u8) !void {
+            const hints = self.hints orelse return;
+            _ = hints.value_lexemes orelse return;
+            if (self.current_value_path.items.len == 0) return;
+            try self.recordValueLexemeByPath(.{ .segments = self.current_value_path.items }, raw);
+        }
+
         fn recordKeyStyleByPath(self: *Self, path: hints_mod.HintPath, style: hints_mod.KeyStyle) !void {
             const hints = self.hints orelse return;
             const key_styles = hints.key_styles orelse return;
@@ -252,6 +267,32 @@ fn ParserTy(comptime V: type) type {
             var owned = try path.clone(self.gpa);
             errdefer owned.deinit(self.gpa);
             try key_styles.put(self.gpa, owned, style);
+        }
+
+        fn recordKeyLexemeByPath(self: *Self, path: hints_mod.HintPath, raw: []const u8) !void {
+            const hints = self.hints orelse return;
+            const key_lexemes = hints.key_lexemes orelse return;
+
+            if (key_lexemes.contains(path)) return;
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+            const raw_owned = try self.gpa.dupe(u8, raw);
+            errdefer self.gpa.free(raw_owned);
+            try key_lexemes.put(self.gpa, owned, raw_owned);
+        }
+
+        fn recordValueLexemeByPath(self: *Self, path: hints_mod.HintPath, raw: []const u8) !void {
+            const hints = self.hints orelse return;
+            const value_lexemes = hints.value_lexemes orelse return;
+
+            if (value_lexemes.contains(path)) return;
+
+            var owned = try path.clone(self.gpa);
+            errdefer owned.deinit(self.gpa);
+            const raw_owned = try self.gpa.dupe(u8, raw);
+            errdefer self.gpa.free(raw_owned);
+            try value_lexemes.put(self.gpa, owned, raw_owned);
         }
 
         fn recordKeyStylesForTablePath(
@@ -272,6 +313,27 @@ fn ParserTy(comptime V: type) type {
             for (key_parts, key_styles) |part, style| {
                 path_buf.appendAssumeCapacity(.{ .key = part });
                 try self.recordKeyStyleByPath(.{ .segments = path_buf.items }, style);
+            }
+        }
+
+        fn recordKeyLexemesForTablePath(
+            self: *Self,
+            key_parts: [][]u8,
+            raw_parts: []const []u8,
+        ) !void {
+            const hints = self.hints orelse return;
+            _ = hints.key_lexemes orelse return;
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, self.table_path.items.len + key_parts.len);
+            for (self.table_path.items) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+            }
+            for (key_parts, raw_parts) |part, raw| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordKeyLexemeByPath(.{ .segments = path_buf.items }, raw);
             }
         }
 
@@ -296,6 +358,63 @@ fn ParserTy(comptime V: type) type {
             }
         }
 
+        fn recordKeyStylesForAbsolutePath(
+            self: *Self,
+            key_parts: [][]u8,
+            key_styles: []const hints_mod.KeyStyle,
+        ) !void {
+            const hints = self.hints orelse return;
+            _ = hints.key_styles orelse return;
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, key_parts.len);
+            for (key_parts, key_styles) |part, style| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordKeyStyleByPath(.{ .segments = path_buf.items }, style);
+            }
+        }
+
+        fn recordKeyLexemesForCurrentValuePath(
+            self: *Self,
+            key_parts: [][]u8,
+            raw_parts: []const []u8,
+        ) !void {
+            const hints = self.hints orelse return;
+            _ = hints.key_lexemes orelse return;
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, self.current_value_path.items.len + key_parts.len);
+            for (self.current_value_path.items) |segment| {
+                path_buf.appendAssumeCapacity(segment);
+            }
+            for (key_parts, raw_parts) |part, raw| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordKeyLexemeByPath(.{ .segments = path_buf.items }, raw);
+            }
+        }
+
+        fn recordKeyLexemesForAbsolutePath(
+            self: *Self,
+            key_parts: [][]u8,
+            raw_parts: []const []u8,
+        ) !void {
+            const hints = self.hints orelse return;
+            _ = hints.key_lexemes orelse return;
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, key_parts.len);
+            for (key_parts, raw_parts) |part, raw| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordKeyLexemeByPath(.{ .segments = path_buf.items }, raw);
+            }
+        }
+
         fn recordTableSyntaxByPath(self: *Self, path: hints_mod.HintPath, syntax: hints_mod.TableSyntax) !void {
             const hints = self.hints orelse return;
             const table_syntax = hints.table_syntax orelse return;
@@ -317,9 +436,75 @@ fn ParserTy(comptime V: type) type {
             try self.recordTableSyntaxByPath(path, syntax);
         }
 
+        fn recordIntermediateTableSyntaxForTablePath(
+            self: *Self,
+            key_parts: [][]u8,
+            syntax: hints_mod.TableSyntax,
+        ) !void {
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, self.table_path.items.len + key_parts.len);
+            for (self.table_path.items) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+            }
+            for (key_parts) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordTableSyntaxByPath(.{ .segments = path_buf.items }, syntax);
+            }
+        }
+
         fn recordTableSyntaxForCurrentValuePath(self: *Self, syntax: hints_mod.TableSyntax) !void {
             if (self.current_value_path.items.len == 0) return;
             try self.recordTableSyntaxByPath(.{ .segments = self.current_value_path.items }, syntax);
+        }
+
+        fn recordTableSyntaxForAbsoluteKeyParts(self: *Self, key_parts: [][]u8, syntax: hints_mod.TableSyntax) !void {
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, key_parts.len);
+            for (key_parts) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+            }
+            try self.recordTableSyntaxByPath(.{ .segments = path_buf.items }, syntax);
+        }
+
+        fn recordIntermediateTableSyntaxForCurrentValuePath(
+            self: *Self,
+            key_parts: [][]u8,
+            syntax: hints_mod.TableSyntax,
+        ) !void {
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, self.current_value_path.items.len + key_parts.len);
+            for (self.current_value_path.items) |segment| {
+                path_buf.appendAssumeCapacity(segment);
+            }
+            for (key_parts) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordTableSyntaxByPath(.{ .segments = path_buf.items }, syntax);
+            }
+        }
+
+        fn recordIntermediateTableSyntaxForAbsolutePath(
+            self: *Self,
+            key_parts: [][]u8,
+            syntax: hints_mod.TableSyntax,
+        ) !void {
+            if (key_parts.len == 0) return;
+
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, key_parts.len);
+            for (key_parts) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+                try self.recordTableSyntaxByPath(.{ .segments = path_buf.items }, syntax);
+            }
         }
 
         fn appendCommentRecordByPath(
@@ -327,12 +512,13 @@ fn ParserTy(comptime V: type) type {
             path: hints_mod.HintPath,
             attachment: hints_mod.CommentAttachment,
             text: []const u8,
+            raw: ?[]const u8,
         ) !void {
             const hints = self.hints orelse return;
             const comments = hints.comments orelse return;
 
             if (comments.getPtr(path)) |records| {
-                try records.append(self.gpa, .{ .attachment = attachment, .text = text });
+                try records.append(self.gpa, .{ .attachment = attachment, .text = text, .raw = raw });
                 return;
             }
 
@@ -341,7 +527,7 @@ fn ParserTy(comptime V: type) type {
 
             var records: hints_mod.CommentList = .empty;
             errdefer records.deinit(self.gpa);
-            try records.append(self.gpa, .{ .attachment = attachment, .text = text });
+            try records.append(self.gpa, .{ .attachment = attachment, .text = text, .raw = raw });
             try comments.put(self.gpa, owned, records);
         }
 
@@ -350,11 +536,28 @@ fn ParserTy(comptime V: type) type {
             key_parts: [][]u8,
             attachment: hints_mod.CommentAttachment,
             text: []const u8,
+            raw: ?[]const u8,
         ) !void {
             var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
             defer path_buf.deinit(self.gpa);
             const path = try self.pathForKey(key_parts, &path_buf);
-            try self.appendCommentRecordByPath(path, attachment, text);
+            try self.appendCommentRecordByPath(path, attachment, text, raw);
+        }
+
+        fn appendCommentRecordForAbsoluteKey(
+            self: *Self,
+            key_parts: [][]u8,
+            attachment: hints_mod.CommentAttachment,
+            text: []const u8,
+            raw: ?[]const u8,
+        ) !void {
+            var path_buf: std.ArrayList(hints_mod.PathSegment) = .empty;
+            defer path_buf.deinit(self.gpa);
+            try path_buf.ensureTotalCapacity(self.gpa, key_parts.len);
+            for (key_parts) |part| {
+                path_buf.appendAssumeCapacity(.{ .key = part });
+            }
+            try self.appendCommentRecordByPath(.{ .segments = path_buf.items }, attachment, text, raw);
         }
 
         fn flushPendingComments(
@@ -362,8 +565,19 @@ fn ParserTy(comptime V: type) type {
             key_parts: [][]u8,
             attachment: hints_mod.CommentAttachment,
         ) !void {
-            for (self.pending_comments.items) |text| {
-                try self.appendCommentRecordForKey(key_parts, attachment, text);
+            for (self.pending_comments.items) |comment| {
+                try self.appendCommentRecordForKey(key_parts, attachment, comment.text, comment.raw);
+            }
+            self.pending_comments.clearRetainingCapacity();
+        }
+
+        fn flushPendingCommentsAbsolute(
+            self: *Self,
+            key_parts: [][]u8,
+            attachment: hints_mod.CommentAttachment,
+        ) !void {
+            for (self.pending_comments.items) |comment| {
+                try self.appendCommentRecordForAbsoluteKey(key_parts, attachment, comment.text, comment.raw);
             }
             self.pending_comments.clearRetainingCapacity();
         }
@@ -372,6 +586,7 @@ fn ParserTy(comptime V: type) type {
             self: *Self,
             key_parts: [][]u8,
             attachment: hints_mod.CommentAttachment,
+            raw_start: usize,
         ) ParseError!void {
             self.advance();
             const start = self.pos;
@@ -382,8 +597,25 @@ fn ParserTy(comptime V: type) type {
                 self.advance();
             }
             const trimmed = std.mem.trim(u8, self.input[start..self.pos], " \t");
-            if (trimmed.len == 0) return;
-            try self.appendCommentRecordForKey(key_parts, attachment, trimmed);
+            try self.appendCommentRecordForKey(key_parts, attachment, trimmed, self.input[raw_start..self.pos]);
+        }
+
+        fn captureAttachedCommentAbsolute(
+            self: *Self,
+            key_parts: [][]u8,
+            attachment: hints_mod.CommentAttachment,
+            raw_start: usize,
+        ) ParseError!void {
+            self.advance();
+            const start = self.pos;
+            while (self.peek()) |c| {
+                if (c == '\n' or c == '\r') break;
+                if (c != '\t' and (c < 0x20 or c == 0x7F))
+                    return self.fail("control character U+{X:0>4} not allowed in comment", .{c});
+                self.advance();
+            }
+            const trimmed = std.mem.trim(u8, self.input[start..self.pos], " \t");
+            try self.appendCommentRecordForAbsoluteKey(key_parts, attachment, trimmed, self.input[raw_start..self.pos]);
         }
 
         fn createMeta(self: *Self, tbl: *TableType, kind: TableKind) Allocator.Error!*TableMeta {
@@ -456,12 +688,13 @@ fn ParserTy(comptime V: type) type {
                     self.advance();
                     self.advance();
                 } else return self.fail("bare CR not allowed", .{}),
-                '#' => try self.skipComment(),
+                '#' => try self.skipComment(null),
                 else => break,
             };
         }
 
-        fn skipComment(self: *Self) ParseError!void {
+        fn skipComment(self: *Self, raw_start: ?usize) ParseError!void {
+            const comment_raw_start = raw_start orelse self.line_start;
             self.advance();
             const start = self.pos;
             while (self.peek()) |c| {
@@ -471,18 +704,17 @@ fn ParserTy(comptime V: type) type {
                 self.advance();
             }
             const trimmed = std.mem.trim(u8, self.input[start..self.pos], " \t");
-            if (trimmed.len == 0) return;
             const hints = self.hints orelse return;
             const comments = hints.comments orelse return;
 
             if (self.trailing_path) |path| {
                 _ = comments;
-                try self.appendCommentRecordByPath(path, .trailing_entry, trimmed);
+                try self.appendCommentRecordByPath(path, .trailing_entry, trimmed, self.input[comment_raw_start..self.pos]);
                 var owned = self.trailing_path.?;
                 owned.deinit(self.gpa);
                 self.trailing_path = null;
-            } else {
-                try self.pending_comments.append(self.gpa, trimmed);
+            } else if (self.current_value_path.items.len == 0) {
+                try self.pending_comments.append(self.gpa, .{ .text = trimmed, .raw = self.input[comment_raw_start..self.pos] });
             }
         }
 
@@ -525,11 +757,22 @@ fn ParserTy(comptime V: type) type {
 
         // ─── key parsing ─────────────────────────────────────────────────────────
 
-        fn parseKeyPart(self: *Self) ParseError!struct { text: []u8, style: hints_mod.KeyStyle } {
-            return switch (self.peek() orelse 0) {
+        fn parseKeyPart(self: *Self) ParseError!struct { text: []u8, style: hints_mod.KeyStyle, raw: []u8 } {
+            const ParsedKeyPart = struct {
+                text: []u8,
+                style: hints_mod.KeyStyle,
+            };
+            const start = self.pos;
+            const parsed: ParsedKeyPart = switch (self.peek() orelse 0) {
                 '"' => .{ .text = try self.parseBasicStringRaw(), .style = .basic },
                 '\'' => .{ .text = try self.parseLiteralStringRaw(), .style = .literal },
                 else => .{ .text = try self.parseBareKey(), .style = .bare },
+            };
+            errdefer self.gpa.free(parsed.text);
+            return .{
+                .text = parsed.text,
+                .style = parsed.style,
+                .raw = try self.gpa.dupe(u8, self.input[start..self.pos]),
             };
         }
 
@@ -545,17 +788,24 @@ fn ParserTy(comptime V: type) type {
         fn parseDottedKey(self: *Self) ParseError!ParsedKeyPath {
             var parts: std.ArrayList([]u8) = .empty;
             var styles: std.ArrayList(hints_mod.KeyStyle) = .empty;
+            var raw_parts: std.ArrayList([]u8) = .empty;
             errdefer {
                 for (parts.items) |p| self.gpa.free(p);
                 parts.deinit(self.gpa);
                 styles.deinit(self.gpa);
+                for (raw_parts.items) |p| self.gpa.free(p);
+                raw_parts.deinit(self.gpa);
             }
             const first = try self.parseKeyPart();
             var first_owned = true;
             errdefer if (first_owned) self.gpa.free(first.text);
+            var first_raw_owned = true;
+            errdefer if (first_raw_owned) self.gpa.free(first.raw);
             try parts.append(self.gpa, first.text);
             first_owned = false;
             try styles.append(self.gpa, first.style);
+            try raw_parts.append(self.gpa, first.raw);
+            first_raw_owned = false;
             while (true) {
                 self.skipInlineWs();
                 if (!self.eat('.')) break;
@@ -563,11 +813,15 @@ fn ParserTy(comptime V: type) type {
                 const next_key = try self.parseKeyPart();
                 var next_owned = true;
                 errdefer if (next_owned) self.gpa.free(next_key.text);
+                var next_raw_owned = true;
+                errdefer if (next_raw_owned) self.gpa.free(next_key.raw);
                 try parts.append(self.gpa, next_key.text);
                 next_owned = false;
                 try styles.append(self.gpa, next_key.style);
+                try raw_parts.append(self.gpa, next_key.raw);
+                next_raw_owned = false;
             }
-            return .{ .parts = parts, .styles = styles };
+            return .{ .parts = parts, .styles = styles, .raw_parts = raw_parts };
         }
 
         // ─── string parsing ───────────────────────────────────────────────────────
@@ -819,8 +1073,9 @@ fn ParserTy(comptime V: type) type {
         // ─── value parsing ────────────────────────────────────────────────────────
 
         fn parseValue(self: *Self) ParseError!V {
+            const start = self.pos;
             const c = self.peek() orelse return self.fail("expected a value", .{});
-            return switch (c) {
+            const value: V = try switch (c) {
                 '"' => if (self.peekAt(1) == '"' and self.peekAt(2) == '"') blk: {
                     const v = try self.parseMLBasicString();
                     try self.recordStringHint(.multiline_basic);
@@ -829,11 +1084,11 @@ fn ParserTy(comptime V: type) type {
                     if (comptime V == types.Value) {
                         const s = try self.parseBasicStringRaw();
                         try self.recordStringHint(.basic);
-                        break :blk .{ .string = s };
+                        break :blk V{ .string = s };
                     } else {
                         const s = try self.parseViewString();
                         try self.recordStringHint(.basic);
-                        break :blk .{ .string = s };
+                        break :blk V{ .string = s };
                     }
                 },
                 '\'' => if (self.peekAt(1) == '\'' and self.peekAt(2) == '\'') blk: {
@@ -844,11 +1099,11 @@ fn ParserTy(comptime V: type) type {
                     if (comptime V == types.Value) {
                         const s = try self.parseLiteralStringRaw();
                         try self.recordStringHint(.literal);
-                        break :blk .{ .string = s };
+                        break :blk V{ .string = s };
                     } else {
                         const s = try self.parseViewLiteralString();
                         try self.recordStringHint(.literal);
-                        break :blk .{ .string = s };
+                        break :blk V{ .string = s };
                     }
                 },
                 't' => self.parseTrue(),
@@ -859,6 +1114,11 @@ fn ParserTy(comptime V: type) type {
                 'i', 'n' => self.parseInfOrNan(),
                 else => self.fail("unexpected character '{c}' while parsing value", .{c}),
             };
+            switch (value) {
+                .float, .offset_datetime, .local_datetime, .local_date, .local_time => try self.recordScalarLexeme(self.input[start..self.pos]),
+                else => {},
+            }
+            return value;
         }
 
         fn parseTrue(self: *Self) ParseError!V {
@@ -1187,6 +1447,10 @@ fn ParserTy(comptime V: type) type {
                 var key_parts = try self.parseDottedKey();
                 defer key_parts.deinit(self.gpa);
                 try self.recordKeyStylesForCurrentValuePath(key_parts.parts.items, key_parts.styles.items);
+                try self.recordKeyLexemesForCurrentValuePath(key_parts.parts.items, key_parts.raw_parts.items);
+                if (key_parts.parts.items.len > 1) {
+                    try self.recordIntermediateTableSyntaxForCurrentValuePath(key_parts.parts.items[0 .. key_parts.parts.items.len - 1], .dotted);
+                }
                 self.skipInlineWs();
                 try self.expect('=');
                 self.skipInlineWs();
@@ -1293,20 +1557,25 @@ fn ParserTy(comptime V: type) type {
             self.skipInlineWs();
             var key_parts = try self.parseDottedKey();
             defer key_parts.deinit(self.gpa);
-            try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
+            try self.recordKeyStylesForAbsolutePath(key_parts.parts.items, key_parts.styles.items);
+            try self.recordKeyLexemesForAbsolutePath(key_parts.parts.items, key_parts.raw_parts.items);
+            if (key_parts.parts.items.len > 1) {
+                try self.recordIntermediateTableSyntaxForAbsolutePath(key_parts.parts.items[0 .. key_parts.parts.items.len - 1], .dotted);
+            }
 
             if (self.pending_comments.items.len > 0) {
-                try self.flushPendingComments(key_parts.parts.items, .before_table);
+                try self.flushPendingCommentsAbsolute(key_parts.parts.items, .before_table);
             }
 
             self.skipInlineWs();
             try self.expect(']');
+            const trailing_comment_start = self.pos;
             self.skipInlineWs();
             if (!self.isEOL() and self.peek() != '#' and self.peek() != null)
                 return self.fail("extra content after table header", .{});
-            if (self.peek() == '#') try self.captureAttachedComment(key_parts.parts.items, .trailing_table);
+            if (self.peek() == '#') try self.captureAttachedCommentAbsolute(key_parts.parts.items, .trailing_table, trailing_comment_start);
             try self.skipToEOL();
-            try self.recordTableSyntaxForKeyParts(key_parts.parts.items, .header);
+            try self.recordTableSyntaxForAbsoluteKeyParts(key_parts.parts.items, .header);
             self.cur = try self.navigateToHeaderTable(self.root, key_parts.parts.items);
             try self.setTablePath(key_parts.parts.items);
         }
@@ -1317,21 +1586,26 @@ fn ParserTy(comptime V: type) type {
             self.skipInlineWs();
             var key_parts = try self.parseDottedKey();
             defer key_parts.deinit(self.gpa);
-            try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
+            try self.recordKeyStylesForAbsolutePath(key_parts.parts.items, key_parts.styles.items);
+            try self.recordKeyLexemesForAbsolutePath(key_parts.parts.items, key_parts.raw_parts.items);
+            if (key_parts.parts.items.len > 1) {
+                try self.recordIntermediateTableSyntaxForAbsolutePath(key_parts.parts.items[0 .. key_parts.parts.items.len - 1], .dotted);
+            }
 
             if (self.pending_comments.items.len > 0) {
-                try self.flushPendingComments(key_parts.parts.items, .before_aot);
+                try self.flushPendingCommentsAbsolute(key_parts.parts.items, .before_aot);
             }
 
             self.skipInlineWs();
             try self.expect(']');
             try self.expect(']');
+            const trailing_comment_start = self.pos;
             self.skipInlineWs();
             if (!self.isEOL() and self.peek() != '#' and self.peek() != null)
                 return self.fail("extra content after array-of-tables header", .{});
-            if (self.peek() == '#') try self.captureAttachedComment(key_parts.parts.items, .trailing_aot);
+            if (self.peek() == '#') try self.captureAttachedCommentAbsolute(key_parts.parts.items, .trailing_aot, trailing_comment_start);
             try self.skipToEOL();
-            try self.recordTableSyntaxForKeyParts(key_parts.parts.items, .aot);
+            try self.recordTableSyntaxForAbsoluteKeyParts(key_parts.parts.items, .aot);
             self.cur = try self.navigateToAOT(self.root, key_parts.parts.items);
             try self.setTablePath(key_parts.parts.items);
         }
@@ -1461,6 +1735,10 @@ fn ParserTy(comptime V: type) type {
             var key_parts = try self.parseDottedKey();
             defer key_parts.deinit(self.gpa);
             try self.recordKeyStylesForTablePath(key_parts.parts.items, key_parts.styles.items);
+            try self.recordKeyLexemesForTablePath(key_parts.parts.items, key_parts.raw_parts.items);
+            if (key_parts.parts.items.len > 1) {
+                try self.recordIntermediateTableSyntaxForTablePath(key_parts.parts.items[0 .. key_parts.parts.items.len - 1], .dotted);
+            }
 
             if (self.pending_comments.items.len > 0) {
                 try self.flushPendingComments(key_parts.parts.items, .before_entry);
@@ -1498,6 +1776,7 @@ fn ParserTy(comptime V: type) type {
                     },
                     else => {
                         try self.parseKeyVal();
+                        const trailing_comment_start = self.pos;
                         self.skipInlineWs();
                         const next = self.peek() orelse break;
                         switch (next) {
@@ -1507,7 +1786,7 @@ fn ParserTy(comptime V: type) type {
                                 try self.eatNewline();
                             },
                             '#' => {
-                                try self.skipComment();
+                                try self.skipComment(trailing_comment_start);
                                 try self.eatNewline();
                             },
                             else => return self.fail("expected newline after key/value pair, found '{c}'", .{self.peek().?}),
