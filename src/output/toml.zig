@@ -947,9 +947,12 @@ fn writePreserveOrder(
     const table_is_dotted = path.len > 0 and findTableSyntax(hints, buildHintPath(&table_path_buf, path, null)) == .dotted;
     var use_dotted = table_is_dotted;
     var needs_blank_before_dotted = false;
-    for (kvs) |kv| {
+    var hoisted_plain_suffix = false;
+    var crossed_child_boundary = false;
+    for (kvs, 0..) |kv, index| {
         switch (kv.kind) {
             .plain, .inline_table => {
+                if (!table_is_dotted and crossed_child_boundary) continue;
                 if (use_dotted and path.len > 0) {
                     var full_path_buf: [129]hints_mod.PathSegment = undefined;
                     const full_path = buildHintPath(&full_path_buf, path, kv.key);
@@ -968,22 +971,42 @@ fn writePreserveOrder(
                 }
             },
             .table => {
+                if (!table_is_dotted and !hoisted_plain_suffix) {
+                    crossed_child_boundary = true;
+                    hoisted_plain_suffix = true;
+                    for (kvs[index + 1 ..]) |later| {
+                        switch (later.kind) {
+                            .plain, .inline_table => try writeKV(w, later.key, later.val, opts, hints, path, comment_state, original_root, gpa),
+                            else => {},
+                        }
+                    }
+                }
                 use_dotted = false;
                 @memcpy(path_buf[0..path.len], path);
                 path_buf[path.len] = kv.key;
                 const child_path = path_buf[0 .. path.len + 1];
                 try writeChildTableBody(w, child_path, kv.val.table, opts, hints, comment_state, original_root, gpa);
-                use_dotted = path.len > 0;
-                needs_blank_before_dotted = path.len > 0;
+                use_dotted = table_is_dotted;
+                needs_blank_before_dotted = table_is_dotted;
             },
             .aot => {
+                if (!table_is_dotted and !hoisted_plain_suffix) {
+                    crossed_child_boundary = true;
+                    hoisted_plain_suffix = true;
+                    for (kvs[index + 1 ..]) |later| {
+                        switch (later.kind) {
+                            .plain, .inline_table => try writeKV(w, later.key, later.val, opts, hints, path, comment_state, original_root, gpa),
+                            else => {},
+                        }
+                    }
+                }
                 use_dotted = false;
                 @memcpy(path_buf[0..path.len], path);
                 path_buf[path.len] = kv.key;
                 const aot_path = path_buf[0 .. path.len + 1];
                 try writeAotBodies(w, aot_path, kv.val.array, opts, hints, comment_state, original_root, gpa);
-                use_dotted = path.len > 0;
-                needs_blank_before_dotted = path.len > 0;
+                use_dotted = table_is_dotted;
+                needs_blank_before_dotted = table_is_dotted;
             },
         }
     }

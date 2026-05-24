@@ -674,11 +674,20 @@ zig build test
 
 Runs 150 tests: unit tests for both APIs plus the full toml-lang/toml-test corpus (215 valid + 467 invalid files), including corpus-backed sweeps for `parseInto`.
 
+For the focused real-document release gate, run:
+
+```sh
+zig build validate
+```
+
+This runs the end-to-end validation harness in `test/validation.zig` plus the example, proteomics, and pyproject smoke programs.
+
 ## Build steps
 
 | Command                | What it does                                           |
 | ---------------------- | ------------------------------------------------------ |
 | `zig build test`       | Run all unit tests and the toml-test corpus            |
+| `zig build validate`   | Run the end-to-end validation harness and real-document smoke matrix |
 | `zig build fuzz`       | Run the in-process fuzz harness (5000 random inputs)   |
 | `zig build example`    | Parse `examples/example.toml` -> JSON to stdout        |
 | `zig build proteomics` | Parse `examples/proteomics.toml` -> color-coded report |

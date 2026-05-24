@@ -23,6 +23,17 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const validation_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/validation.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "toml", .module = toml_module },
+            },
+        }),
+    });
+
     const example_exe = b.addExecutable(.{
         .name = "parse-example",
         .root_module = b.createModule(.{
@@ -65,6 +76,8 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_pyproject = b.addRunArtifact(pyproject_exe);
+    const run_pyproject_smoke = b.addRunArtifact(pyproject_exe);
+    run_pyproject_smoke.addArg("--smoke");
     b.step("pyproject", "Parse pyproject.toml, output JSON + TOML").dependOn(&run_pyproject.step);
 
     const bench_exe = b.addExecutable(.{
@@ -119,8 +132,14 @@ pub fn build(b: *std.Build) void {
     });
 
     const run_tests = b.addRunArtifact(tests);
+    const run_validation = b.addRunArtifact(validation_tests);
     const run_fuzz = b.addRunArtifact(fuzz_exe);
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
+    const validate_step = b.step("validate", "Run end-to-end validation harness and real-document smoke matrix");
+    validate_step.dependOn(&run_validation.step);
+    validate_step.dependOn(&run_example.step);
+    validate_step.dependOn(&run_proteomics.step);
+    validate_step.dependOn(&run_pyproject_smoke.step);
     b.step("fuzz", "Run fuzz harness (5,000 random inputs)").dependOn(&run_fuzz.step);
     b.step("fuzz-test", "Run fuzz harness through Zig's test runner").dependOn(&b.addRunArtifact(fuzz_tests).step);
     b.step("example", "Run the example TOML parser").dependOn(&run_example.step);
