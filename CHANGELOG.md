@@ -5,7 +5,7 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
-## [0.4.0] - 2026-05-24
+## [0.4.0] - 2026-05-24 - [Tagged]
 
 ### Added
 
@@ -181,3 +181,4 @@ First public release.
 [0.1.2]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.1.2
 [0.2.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.2.0
 [0.3.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.3.0
+[0.4.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.4.0
