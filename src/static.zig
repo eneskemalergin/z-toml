@@ -59,19 +59,46 @@ fn mapTable(comptime T: type, table: *Table, gpa: Allocator) ParseIntoError!T {
 
     var result: T = undefined;
 
-    inline for (@typeInfo(T).@"struct".fields) |field| {
-        if (table.get(field.name)) |v| {
-            @field(result, field.name) = try mapValue(field.type, v, gpa);
-        } else if (@typeInfo(field.type) == .optional) {
-            @field(result, field.name) = null;
-        } else if (field.defaultValue()) |def| {
-            @field(result, field.name) = def;
+    inline for (0..comptime structFieldCount(T)) |i| {
+        const name = comptime structFieldName(T, i);
+        const FieldType = comptime structFieldType(T, i);
+        if (table.get(name)) |v| {
+            @field(result, name) = try mapValue(FieldType, v, gpa);
+        } else if (@typeInfo(FieldType) == .optional) {
+            @field(result, name) = null;
+        } else if (structFieldDefault(T, i)) |def| {
+            @field(result, name) = def;
         } else {
             return error.MissingField;
         }
     }
 
     return result;
+}
+
+// Zig 0.16 exposes struct fields as one `fields` array. Zig 0.17 exposes parallel
+// `field_names`, `field_types` and `field_attrs` arrays. These helpers read either form.
+const parallel_struct_info = @hasField(@TypeOf(@typeInfo(struct {}).@"struct"), "field_names");
+
+fn structFieldCount(comptime T: type) usize {
+    const info = @typeInfo(T).@"struct";
+    return if (parallel_struct_info) info.field_names.len else info.fields.len;
+}
+
+fn structFieldName(comptime T: type, comptime i: usize) [:0]const u8 {
+    const info = @typeInfo(T).@"struct";
+    return if (parallel_struct_info) info.field_names[i] else info.fields[i].name;
+}
+
+fn structFieldType(comptime T: type, comptime i: usize) type {
+    const info = @typeInfo(T).@"struct";
+    return if (parallel_struct_info) info.field_types[i] else info.fields[i].type;
+}
+
+fn structFieldDefault(comptime T: type, comptime i: usize) ?structFieldType(T, i) {
+    const info = @typeInfo(T).@"struct";
+    if (parallel_struct_info) return info.field_attrs[i].defaultValue(structFieldType(T, i));
+    return info.fields[i].defaultValue();
 }
 
 fn mapValue(comptime T: type, value: Value, gpa: Allocator) ParseIntoError!T {

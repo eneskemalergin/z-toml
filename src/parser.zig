@@ -43,7 +43,7 @@ pub fn deinitTable(tbl: *Table, gpa: Allocator) void {
 pub const ErrorInfo = struct {
     line: u32 = 0,
     col: u32 = 0,
-    _buf: [256]u8 = [_]u8{0} ** 256,
+    _buf: [256]u8 = @splat(0),
     _len: usize = 0,
 
     pub fn message(self: *const ErrorInfo) []const u8 {
