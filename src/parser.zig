@@ -1713,14 +1713,12 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 return self.fail("cannot add keys to inline table after definition", .{});
             if (tbl.contains(last)) return self.fail("key '{s}' is already defined", .{last});
 
-            // Ensure capacity first so the insertion below is infallible; this
+            // Ensure capacity first so the table insertion below is infallible; this
             // prevents a partial-state slot that would corrupt deinitTable on OOM.
             try tbl.ensureUnusedCapacity(self.gpa, 1);
             const key_owned = try self.gpa.dupe(u8, last);
             var key_in_map = false;
             errdefer if (!key_in_map) self.gpa.free(key_owned);
-            tbl.putAssumeCapacityNoClobber(key_owned, value);
-            key_in_map = true; // table owns key_owned; deinitTable handles cleanup
 
             const kk: KeyKind = switch (value) {
                 .table => |t| switch (self.getMeta(t).kind) {
@@ -1732,7 +1730,11 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 },
                 else => .value,
             };
+            // The metadata insert can fail. It runs before the table takes ownership
+            // of `value`, so on failure the caller's errdefer still owns `value` alone.
             try meta.key_kinds.put(ma, key_owned, kk);
+            tbl.putAssumeCapacityNoClobber(key_owned, value);
+            key_in_map = true; // table owns key_owned; deinitTable handles cleanup
         }
 
         // ─── table header parsing ─────────────────────────────────────────────────

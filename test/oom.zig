@@ -132,6 +132,13 @@ test "oom: dotted key in table header" {
     );
 }
 
+test "oom: dotted key with string value" {
+    try checkOOM(
+        \\a.b = "hello"
+        \\a.c = "world"
+    );
+}
+
 // ─── Invalid TOML: rejection with clean teardown ───────────────────────────────
 
 test "oom: duplicate key rejection" {
