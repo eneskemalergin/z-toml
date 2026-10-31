@@ -132,6 +132,13 @@ test "oom: dotted key in table header" {
     );
 }
 
+test "oom: dotted key with string value" {
+    try checkOOM(
+        \\a.b = "hello"
+        \\a.c = "world"
+    );
+}
+
 // ─── Invalid TOML: rejection with clean teardown ───────────────────────────────
 
 test "oom: duplicate key rejection" {
@@ -171,4 +178,30 @@ test "oom: control char in string" {
 
 test "oom: unclosed string" {
     try checkOOMInvalid("key = \"unclosed\n");
+}
+
+test "oom: bad comment after array element" {
+    try checkOOMInvalid("a = [\"x\" # c\x01\n]\n");
+}
+
+test "oom: bad comment after inline table entry" {
+    try checkOOMInvalid("a = { b = \"x\" # c\x01\n}\n");
+}
+
+// ─── Hint collection ───────────────────────────────────────────────────────────
+
+fn parseWithHints(ally: std.mem.Allocator, src: []const u8) !void {
+    var string_styles: toml.HintMap(toml.StringStyle) = .empty;
+    var comments: toml.CommentMap = .empty;
+    var hints: toml.FormatHints = .{ .string_styles = &string_styles, .comments = &comments };
+    defer hints.deinit(ally);
+    const root = try toml.parseSliceWithHints(ally, src, null, &hints);
+    toml.deinit(root, ally);
+}
+
+test "oom: string and comment hints" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, parseWithHints, .{
+        \\a = "x" # first
+        \\b.c = 'y'
+    });
 }

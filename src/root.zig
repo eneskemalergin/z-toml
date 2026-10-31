@@ -91,8 +91,8 @@ pub const toJson = json_output.toJson;
 /// headers. Scalar-only table values may still be emitted inline when the
 /// chosen options allow it. Output is always valid TOML v1.1.0.
 ///
-/// The default path uses `std.heap.page_allocator` for any temporary
-/// serializer allocations, so callers must still handle `error.OutOfMemory`.
+/// The default path uses `std.heap.smp_allocator` for temporary serializer
+/// allocations, so callers must still handle `error.OutOfMemory`.
 pub const writeToml = output_toml.writeToml;
 
 /// Serialize `value` with formatting options.

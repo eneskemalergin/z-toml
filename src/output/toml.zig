@@ -230,7 +230,7 @@ fn writeQuotedWithStyle(
     const requires_basic = for (key) |c| {
         if (needsEscape(c)) break true;
     } else false;
-    if (!requires_basic and std.mem.indexOfScalar(u8, key, '\'') == null) {
+    if (!requires_basic and std.mem.findScalar(u8, key, '\'') == null) {
         return writeLiteralQuotedKey(w, key);
     }
     return writeBasicQuotedKey(w, key);
@@ -388,7 +388,7 @@ fn writeMultilineLiteralString(
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
 ) std.Io.Writer.Error!void {
-    if (std.mem.indexOf(u8, s, "'''") != null) {
+    if (std.mem.find(u8, s, "'''") != null) {
         return writeMultilineBasicString(w, s, opts, hints);
     }
 
@@ -507,7 +507,7 @@ fn writeValue(
             }
             var buf: [64]u8 = undefined;
             const formatted = std.fmt.bufPrint(&buf, "{d}", .{f}) catch "0.0";
-            if (std.mem.indexOfAny(u8, formatted, ".eE") == null) {
+            if (std.mem.findAny(u8, formatted, ".eE") == null) {
                 try w.writeAll(formatted);
                 try w.writeAll(".0");
             } else {
@@ -1030,13 +1030,14 @@ fn writeTable(
 /// Uses `[header]` syntax for sub-tables and `[[...]]` for arrays of
 /// tables. All output is valid TOML v1.1.0.
 pub fn writeToml(value: Value, w: *std.Io.Writer) (std.Io.Writer.Error || Allocator.Error)!void {
-    return writeTomlOpts(value, w, .{}, std.heap.page_allocator);
+    return writeTomlOpts(value, w, .{}, std.heap.smp_allocator);
 }
 
 /// Serialize `value` as TOML text with custom `opts`.
 ///
-/// `gpa` is used for key-sort allocation (a no-op arena allocator
-/// or page_allocator suffice).
+/// `gpa` is used for the per-table scratch buffers (key ordering and inline
+/// entries). Any allocator works; a general-purpose allocator that reuses freed
+/// memory keeps the scratch cost low.
 pub fn writeTomlOpts(
     value: Value,
     w: *std.Io.Writer,
@@ -1084,7 +1085,7 @@ pub fn writeTomlValue(
     value: Value,
     w: *std.Io.Writer,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
-    return writeTomlValueOpts(value, w, .{}, std.heap.page_allocator);
+    return writeTomlValueOpts(value, w, .{}, std.heap.smp_allocator);
 }
 
 pub fn writeTomlPathValueOpts(
