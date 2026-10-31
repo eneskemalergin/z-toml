@@ -1255,35 +1255,35 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             const start = self.pos;
             const c = self.peek() orelse return self.fail("expected a value", .{});
             const value: V = try switch (c) {
+                // The string is parsed before its hint is recorded; if recording
+                // fails, the errdefer releases the string so nothing is left owned.
                 '"' => if (self.peekAt(1) == '"' and self.peekAt(2) == '"') blk: {
                     const v = try self.parseMLBasicString();
+                    errdefer self.dropValue(v);
                     try self.recordStringHint(.multiline_basic);
                     break :blk v;
                 } else blk: {
-                    if (comptime V == types.Value) {
-                        const s = try self.parseBasicStringRaw();
-                        try self.recordStringHint(.basic);
-                        break :blk V{ .string = s };
-                    } else {
-                        const s = try self.parseViewString();
-                        try self.recordStringHint(.basic);
-                        break :blk V{ .string = s };
-                    }
+                    const v: V = .{ .string = if (comptime V == types.Value)
+                        try self.parseBasicStringRaw()
+                    else
+                        try self.parseViewString() };
+                    errdefer self.dropValue(v);
+                    try self.recordStringHint(.basic);
+                    break :blk v;
                 },
                 '\'' => if (self.peekAt(1) == '\'' and self.peekAt(2) == '\'') blk: {
                     const v = try self.parseMLLiteralString();
+                    errdefer self.dropValue(v);
                     try self.recordStringHint(.multiline_literal);
                     break :blk v;
                 } else blk: {
-                    if (comptime V == types.Value) {
-                        const s = try self.parseLiteralStringRaw();
-                        try self.recordStringHint(.literal);
-                        break :blk V{ .string = s };
-                    } else {
-                        const s = try self.parseViewLiteralString();
-                        try self.recordStringHint(.literal);
-                        break :blk V{ .string = s };
-                    }
+                    const v: V = .{ .string = if (comptime V == types.Value)
+                        try self.parseLiteralStringRaw()
+                    else
+                        try self.parseViewLiteralString() };
+                    errdefer self.dropValue(v);
+                    try self.recordStringHint(.literal);
+                    break :blk v;
                 },
                 't' => self.parseTrue(),
                 'f' => self.parseFalse(),
@@ -1596,10 +1596,12 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 errdefer self.restoreCurrentValuePath(path_len);
                 errdefer self.restoreCurrentSpanPath(span_path_len);
                 const v = try self.parseValue();
-                errdefer self.dropValue(v);
+                var v_owned = true;
+                errdefer if (v_owned) self.dropValue(v);
                 self.restoreCurrentValuePath(path_len);
                 self.restoreCurrentSpanPath(span_path_len);
                 try arr.append(self.gpa, v);
+                v_owned = false; // the array owns `v` and frees it with the array
                 next_index += 1;
                 try self.skipTrivia();
                 if (!self.eat(',')) {
@@ -1644,8 +1646,10 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 errdefer self.restoreCurrentSpanPath(span_path_len);
                 const value_start = self.pos;
                 const val = try self.parseValue();
-                errdefer self.dropValue(val);
+                var val_owned = true;
+                errdefer if (val_owned) self.dropValue(val);
                 try self.setNestedKey(tbl, key_parts.parts.items, val, true);
+                val_owned = false; // the table owns `val` and frees it with the table
                 try self.recordCurrentEntrySpan(statement_start, .{ .start = value_start, .end = self.pos });
                 self.restoreCurrentValuePath(path_len);
                 self.restoreCurrentSpanPath(span_path_len);
@@ -1954,8 +1958,10 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             defer self.clearCurrentSpanPath();
             const value_start = self.pos;
             const val = try self.parseValue();
-            errdefer self.dropValue(val);
+            var val_owned = true;
+            errdefer if (val_owned) self.dropValue(val);
             try self.setNestedKey(self.cur, key_parts.parts.items, val, false);
+            val_owned = false; // the table owns `val` and frees it with the table
             try self.stagePendingEntrySpan(statement_start, .{ .start = value_start, .end = self.pos });
 
             // Save path so the upcoming trailing comment (parsed after this function
