@@ -5,6 +5,28 @@ All notable changes to z-toml are documented here. The format follows [Keep a Ch
 
 ---
 
+## [0.4.1] - 2026-10-31
+
+### Added
+
+- Support for Zig 0.17.0 alongside Zig 0.16.0. Zig 0.16.0 remains the minimum version and the default. CI runs both versions on Linux, macOS, and Windows.
+
+### Changed
+
+- Strings with escapes and multi-line strings size their decoding buffer from the text scanned so far, not from the rest of the document. Total allocation no longer grows with the square of the document size.
+- Keys keep their raw text and style lists only when hints are collected, and plain values no longer get a key-kind entry. Parsing key-heavy documents makes 35–50% fewer allocations.
+- `parseInto` frees its temporary tree as soon as mapping finishes, so peak memory for typed parsing is 70–80% lower on large documents.
+- `writeToml` and `writeTomlValue` use `std.heap.smp_allocator` for scratch buffers instead of `std.heap.page_allocator`, which removes one memory-map system call pair per table.
+- Internal byte searches use the `std.mem.find` functions; the `indexOf` names are deprecated in Zig 0.17.
+
+### Fixed
+
+- Double free on invalid input that fails after an array element or inline-table entry has been stored, for example a control character in a following comment.
+- Double free when an allocation fails after a value has been inserted into its table, in the key-kind metadata and in hint and span recording.
+- Leak of a string value when recording its string-style hint fails.
+
+---
+
 ## [0.4.0] - 2026-05-24 - [Tagged]
 
 ### Added
@@ -182,3 +204,4 @@ First public release.
 [0.2.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.2.0
 [0.3.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.3.0
 [0.4.0]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.4.0
+[0.4.1]: https://github.com/eneskemalergin/z-toml/releases/tag/v0.4.1
