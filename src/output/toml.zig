@@ -1030,13 +1030,14 @@ fn writeTable(
 /// Uses `[header]` syntax for sub-tables and `[[...]]` for arrays of
 /// tables. All output is valid TOML v1.1.0.
 pub fn writeToml(value: Value, w: *std.Io.Writer) (std.Io.Writer.Error || Allocator.Error)!void {
-    return writeTomlOpts(value, w, .{}, std.heap.page_allocator);
+    return writeTomlOpts(value, w, .{}, std.heap.smp_allocator);
 }
 
 /// Serialize `value` as TOML text with custom `opts`.
 ///
-/// `gpa` is used for key-sort allocation (a no-op arena allocator
-/// or page_allocator suffice).
+/// `gpa` is used for the per-table scratch buffers (key ordering and inline
+/// entries). Any allocator works; a general-purpose allocator that reuses freed
+/// memory keeps the scratch cost low.
 pub fn writeTomlOpts(
     value: Value,
     w: *std.Io.Writer,
@@ -1084,7 +1085,7 @@ pub fn writeTomlValue(
     value: Value,
     w: *std.Io.Writer,
 ) (std.Io.Writer.Error || Allocator.Error)!void {
-    return writeTomlValueOpts(value, w, .{}, std.heap.page_allocator);
+    return writeTomlValueOpts(value, w, .{}, std.heap.smp_allocator);
 }
 
 pub fn writeTomlPathValueOpts(

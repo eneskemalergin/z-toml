@@ -36,11 +36,13 @@ pub fn parseInto(
     input: []const u8,
     err_info: ?*parser_mod.ErrorInfo,
 ) ParseIntoError!T {
-    // Build the dynamic tree in a temporary arena and discard it after mapping.
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-
-    const root = try parser_mod.parseSlice(arena.allocator(), input, err_info);
+    // The dynamic tree is freed as soon as the mapping is done. Mapped strings and
+    // slices are copies, so nothing in the result refers to the tree.
+    const root = try parser_mod.parseSlice(gpa, input, err_info);
+    defer {
+        parser_mod.deinitTable(root, gpa);
+        gpa.destroy(root);
+    }
     return mapTable(T, root, gpa);
 }
 

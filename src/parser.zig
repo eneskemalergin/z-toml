@@ -12,6 +12,10 @@ pub const LocalTime = types.LocalTime;
 
 const Allocator = std.mem.Allocator;
 
+/// Extra bytes reserved beyond an unescaped prefix when a string needs the
+/// decoding buffer. Longer strings grow the buffer by doubling.
+const string_buffer_slack = 64;
+
 pub const ParseError = error{ ParseFailed, OutOfMemory };
 
 // ─── Memory management (owned Value tree) ─────────────────────────────────────
@@ -79,12 +83,13 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
         const PendingStatementStart = if (track_spans) ?usize else void;
         const ParsedKeyPath = struct {
             parts: std.ArrayList([]u8),
+            /// Filled only when hints are collected.
             styles: std.ArrayList(hints_mod.KeyStyle),
-            raw_parts: std.ArrayList([]u8),
+            /// Borrowed from the input. Filled only when hints are collected.
+            raw_parts: std.ArrayList([]const u8),
 
             fn deinit(self: *ParsedKeyPath, gpa: Allocator) void {
                 for (self.parts.items) |part| gpa.free(part);
-                for (self.raw_parts.items) |part| gpa.free(part);
                 self.parts.deinit(gpa);
                 self.styles.deinit(gpa);
                 self.raw_parts.deinit(gpa);
@@ -494,7 +499,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
         fn recordKeyLexemesForTablePath(
             self: *Self,
             key_parts: [][]u8,
-            raw_parts: []const []u8,
+            raw_parts: []const []const u8,
         ) !void {
             const hints = self.hints orelse return;
             _ = hints.key_lexemes orelse return;
@@ -554,7 +559,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
         fn recordKeyLexemesForCurrentValuePath(
             self: *Self,
             key_parts: [][]u8,
-            raw_parts: []const []u8,
+            raw_parts: []const []const u8,
         ) !void {
             const hints = self.hints orelse return;
             _ = hints.key_lexemes orelse return;
@@ -575,7 +580,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
         fn recordKeyLexemesForAbsolutePath(
             self: *Self,
             key_parts: [][]u8,
-            raw_parts: []const []u8,
+            raw_parts: []const []const u8,
         ) !void {
             const hints = self.hints orelse return;
             _ = hints.key_lexemes orelse return;
@@ -932,7 +937,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
 
         // ─── key parsing ─────────────────────────────────────────────────────────
 
-        fn parseKeyPart(self: *Self) ParseError!struct { text: []u8, style: hints_mod.KeyStyle, raw: []u8 } {
+        fn parseKeyPart(self: *Self) ParseError!struct { text: []u8, style: hints_mod.KeyStyle, raw: []const u8 } {
             const ParsedKeyPart = struct {
                 text: []u8,
                 style: hints_mod.KeyStyle,
@@ -947,7 +952,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             return .{
                 .text = parsed.text,
                 .style = parsed.style,
-                .raw = try self.gpa.dupe(u8, self.input[start..self.pos]),
+                .raw = self.input[start..self.pos],
             };
         }
 
@@ -963,24 +968,25 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
         fn parseDottedKey(self: *Self) ParseError!ParsedKeyPath {
             var parts: std.ArrayList([]u8) = .empty;
             var styles: std.ArrayList(hints_mod.KeyStyle) = .empty;
-            var raw_parts: std.ArrayList([]u8) = .empty;
+            var raw_parts: std.ArrayList([]const u8) = .empty;
             errdefer {
                 for (parts.items) |p| self.gpa.free(p);
                 parts.deinit(self.gpa);
                 styles.deinit(self.gpa);
-                for (raw_parts.items) |p| self.gpa.free(p);
                 raw_parts.deinit(self.gpa);
             }
+            // Styles and raw text feed only the hint recorders, which ignore them
+            // when no hints are collected.
+            const collect = self.hints != null;
             const first = try self.parseKeyPart();
             var first_owned = true;
             errdefer if (first_owned) self.gpa.free(first.text);
-            var first_raw_owned = true;
-            errdefer if (first_raw_owned) self.gpa.free(first.raw);
             try parts.append(self.gpa, first.text);
             first_owned = false;
-            try styles.append(self.gpa, first.style);
-            try raw_parts.append(self.gpa, first.raw);
-            first_raw_owned = false;
+            if (collect) {
+                try styles.append(self.gpa, first.style);
+                try raw_parts.append(self.gpa, first.raw);
+            }
             while (true) {
                 self.skipInlineWs();
                 if (!self.eat('.')) break;
@@ -988,13 +994,12 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 const next_key = try self.parseKeyPart();
                 var next_owned = true;
                 errdefer if (next_owned) self.gpa.free(next_key.text);
-                var next_raw_owned = true;
-                errdefer if (next_raw_owned) self.gpa.free(next_key.raw);
                 try parts.append(self.gpa, next_key.text);
                 next_owned = false;
-                try styles.append(self.gpa, next_key.style);
-                try raw_parts.append(self.gpa, next_key.raw);
-                next_raw_owned = false;
+                if (collect) {
+                    try styles.append(self.gpa, next_key.style);
+                    try raw_parts.append(self.gpa, next_key.raw);
+                }
             }
             return .{ .parts = parts, .styles = styles, .raw_parts = raw_parts };
         }
@@ -1017,7 +1022,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             }
             var buf: std.ArrayList(u8) = .empty;
             errdefer buf.deinit(self.gpa);
-            try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
+            try buf.ensureTotalCapacity(self.gpa, i + string_buffer_slack);
             try self.parseBasicStringContents(&buf);
             try self.expect('"');
             return buf.toOwnedSlice(self.gpa) catch error.OutOfMemory;
@@ -1041,7 +1046,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             }
             var buf: std.ArrayList(u8) = .empty;
             errdefer buf.deinit(self.gpa);
-            try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
+            try buf.ensureTotalCapacity(self.gpa, i + string_buffer_slack);
             try self.parseBasicStringContents(&buf);
             try self.expect('"');
             return buf.toOwnedSlice(self.gpa) catch error.OutOfMemory;
@@ -1056,7 +1061,6 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             _ = self.eat('\n');
             var buf: std.ArrayList(u8) = .empty;
             errdefer buf.deinit(self.gpa);
-            try buf.ensureTotalCapacity(self.gpa, self.input.len - self.pos);
             outer: while (true) {
                 const c = self.peek() orelse return self.fail("unterminated multi-line {s} string", .{if (basic) "basic" else "literal"});
                 if (c == delim) {
@@ -1732,7 +1736,9 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
             };
             // The metadata insert can fail. It runs before the table takes ownership
             // of `value`, so on failure the caller's errdefer still owns `value` alone.
-            try meta.key_kinds.put(ma, key_owned, kk);
+            // Plain values are the default kind (see the lookups above), so they
+            // need no entry of their own.
+            if (kk != .value) try meta.key_kinds.put(ma, key_owned, kk);
             tbl.putAssumeCapacityNoClobber(key_owned, value);
             key_in_map = true; // table owns key_owned; deinitTable handles cleanup
         }
