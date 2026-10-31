@@ -230,7 +230,7 @@ fn writeQuotedWithStyle(
     const requires_basic = for (key) |c| {
         if (needsEscape(c)) break true;
     } else false;
-    if (!requires_basic and std.mem.indexOfScalar(u8, key, '\'') == null) {
+    if (!requires_basic and std.mem.findScalar(u8, key, '\'') == null) {
         return writeLiteralQuotedKey(w, key);
     }
     return writeBasicQuotedKey(w, key);
@@ -388,7 +388,7 @@ fn writeMultilineLiteralString(
     opts: WriteOptions,
     hints: ?*hints_mod.FormatHints,
 ) std.Io.Writer.Error!void {
-    if (std.mem.indexOf(u8, s, "'''") != null) {
+    if (std.mem.find(u8, s, "'''") != null) {
         return writeMultilineBasicString(w, s, opts, hints);
     }
 
@@ -507,7 +507,7 @@ fn writeValue(
             }
             var buf: [64]u8 = undefined;
             const formatted = std.fmt.bufPrint(&buf, "{d}", .{f}) catch "0.0";
-            if (std.mem.indexOfAny(u8, formatted, ".eE") == null) {
+            if (std.mem.findAny(u8, formatted, ".eE") == null) {
                 try w.writeAll(formatted);
                 try w.writeAll(".0");
             } else {

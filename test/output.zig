@@ -416,13 +416,13 @@ test "formatter: sort_keys works on nested tables" {
 
     var buf: [65536]u8 = undefined;
     const out = tomlStringSorted(.{ .table = root }, &buf);
-    try std.testing.expect(std.mem.indexOf(u8, out, "[a_first]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "[z_last]") != null);
-    const a_pos = std.mem.indexOf(u8, out, "[a_first]") orelse unreachable;
-    const z_pos = std.mem.indexOf(u8, out, "[z_last]") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.find(u8, out, "[a_first]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "[z_last]") != null);
+    const a_pos = std.mem.find(u8, out, "[a_first]") orelse unreachable;
+    const z_pos = std.mem.find(u8, out, "[z_last]") orelse return error.TestUnexpectedResult;
     try std.testing.expect(a_pos < z_pos);
-    const inside_a = std.mem.indexOf(u8, out, "a = \"first\"") orelse return error.TestUnexpectedResult;
-    const inside_z = std.mem.indexOf(u8, out, "z = \"last\"") orelse return error.TestUnexpectedResult;
+    const inside_a = std.mem.find(u8, out, "a = \"first\"") orelse return error.TestUnexpectedResult;
+    const inside_z = std.mem.find(u8, out, "z = \"last\"") orelse return error.TestUnexpectedResult;
     try std.testing.expect(inside_a < inside_z);
 }
 
@@ -439,8 +439,8 @@ test "formatter: prefer_headers uses [header] for scalar-only sub-tables" {
     var w = std.Io.Writer.fixed(&buf);
     try toml.writeTomlOpts(.{ .table = root }, &w, .{ .prefer_headers = true }, gpa);
     const out = w.buffered();
-    try std.testing.expect(std.mem.indexOf(u8, out, "[owner]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "name = \"Tom\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, "[owner]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "name = \"Tom\"") != null);
 }
 
 test "formatter: default emits inline for scalar-only sub-tables" {
@@ -456,7 +456,7 @@ test "formatter: default emits inline for scalar-only sub-tables" {
     var w = std.Io.Writer.fixed(&buf);
     try toml.writeTomlOpts(.{ .table = root }, &w, .{}, gpa);
     const out = w.buffered();
-    try std.testing.expect(std.mem.indexOf(u8, out, "owner = {name = \"Tom\"}") != null);
+    try std.testing.expect(std.mem.find(u8, out, "owner = {name = \"Tom\"}") != null);
 }
 
 test "formatter: use_escape_e emits \\e" {
@@ -469,7 +469,7 @@ test "formatter: use_escape_e emits \\e" {
     var w = std.Io.Writer.fixed(&buf);
     try toml.writeTomlOpts(.{ .table = root }, &w, .{ .use_escape_e = true }, gpa);
     const out = w.buffered();
-    try std.testing.expect(std.mem.indexOf(u8, out, "\\e[31m") != null);
+    try std.testing.expect(std.mem.find(u8, out, "\\e[31m") != null);
 }
 
 test "formatter: default escape uses \\u001B for ESC" {
@@ -482,7 +482,7 @@ test "formatter: default escape uses \\u001B for ESC" {
     var w = std.Io.Writer.fixed(&buf);
     try toml.writeTomlOpts(.{ .table = root }, &w, .{}, gpa);
     const out = w.buffered();
-    try std.testing.expect(std.mem.indexOf(u8, out, "\\u001B[31m") != null);
+    try std.testing.expect(std.mem.find(u8, out, "\\u001B[31m") != null);
 }
 
 test "profile: compact produces semantic delta on spec-example fixture" {
@@ -497,8 +497,8 @@ test "profile: compact produces semantic delta on spec-example fixture" {
     defer gpa.free(written);
 
     try std.testing.expect(!std.mem.eql(u8, src, written));
-    try std.testing.expect(std.mem.indexOf(u8, written, "[owner]") == null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "owner = {name = \"Lance Uppercut\", dob = 1979-05-27T07:32:00-08:00}") != null);
+    try std.testing.expect(std.mem.find(u8, written, "[owner]") == null);
+    try std.testing.expect(std.mem.find(u8, written, "owner = {name = \"Lance Uppercut\", dob = 1979-05-27T07:32:00-08:00}") != null);
     try expectReparseMatches(gpa, root, written);
 }
 
@@ -550,11 +550,11 @@ test "profile: canonical sorts real fixture sections without changing tree" {
     defer gpa.free(written);
 
     try std.testing.expect(!std.mem.eql(u8, src, written));
-    const owner_pos = std.mem.indexOf(u8, written, "[owner]\n") orelse return error.TestUnexpectedResult;
-    const dob_pos = std.mem.indexOf(u8, written, "dob = 1979-05-27T07:32:00-08:00") orelse return error.TestUnexpectedResult;
-    const name_pos = std.mem.indexOf(u8, written, "name = \"Lance Uppercut\"") orelse return error.TestUnexpectedResult;
-    const db_connection_pos = std.mem.indexOf(u8, written, "connection_max = 5000") orelse return error.TestUnexpectedResult;
-    const db_server_pos = std.mem.indexOf(u8, written, "server = \"192.168.1.1\"") orelse return error.TestUnexpectedResult;
+    const owner_pos = std.mem.find(u8, written, "[owner]\n") orelse return error.TestUnexpectedResult;
+    const dob_pos = std.mem.find(u8, written, "dob = 1979-05-27T07:32:00-08:00") orelse return error.TestUnexpectedResult;
+    const name_pos = std.mem.find(u8, written, "name = \"Lance Uppercut\"") orelse return error.TestUnexpectedResult;
+    const db_connection_pos = std.mem.find(u8, written, "connection_max = 5000") orelse return error.TestUnexpectedResult;
+    const db_server_pos = std.mem.find(u8, written, "server = \"192.168.1.1\"") orelse return error.TestUnexpectedResult;
     try std.testing.expect(owner_pos < dob_pos);
     try std.testing.expect(dob_pos < name_pos);
     try std.testing.expect(db_connection_pos < db_server_pos);
@@ -572,11 +572,11 @@ test "profile: compact keeps nested array-table ancestry on corpus fixture" {
     const written = try writeProfileOwned(gpa, .{ .table = root }, .compact, null);
     defer gpa.free(written);
 
-    try std.testing.expect(std.mem.indexOf(u8, written, "[[a]]") != null);
+    try std.testing.expect(std.mem.find(u8, written, "[[a]]") != null);
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, written, "[[a.b]]"));
-    try std.testing.expect(std.mem.indexOf(u8, written, "[a.b.c]") == null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "c = {d = \"val0\"}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "c = {d = \"val1\"}") != null);
+    try std.testing.expect(std.mem.find(u8, written, "[a.b.c]") == null);
+    try std.testing.expect(std.mem.find(u8, written, "c = {d = \"val0\"}") != null);
+    try std.testing.expect(std.mem.find(u8, written, "c = {d = \"val1\"}") != null);
     try expectReparseMatches(gpa, root, written);
 }
 
@@ -968,12 +968,12 @@ test "writeToml: without-super-with-values normalizes to parent-first headers" {
     defer gpa.free(written);
 
     try std.testing.expect(!std.mem.eql(u8, src, written));
-    try std.testing.expect(std.mem.indexOf(u8, written, "[x]\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "[x.y.z.w]\n") == null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "c = 3\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "d = 4\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "a = 1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "b = 2") != null);
+    try std.testing.expect(std.mem.find(u8, written, "[x]\n") != null);
+    try std.testing.expect(std.mem.find(u8, written, "[x.y.z.w]\n") == null);
+    try std.testing.expect(std.mem.find(u8, written, "c = 3\n") != null);
+    try std.testing.expect(std.mem.find(u8, written, "d = 4\n") != null);
+    try std.testing.expect(std.mem.find(u8, written, "a = 1") != null);
+    try std.testing.expect(std.mem.find(u8, written, "b = 2") != null);
     try expectReparseMatches(gpa, root, written);
 }
 
@@ -991,10 +991,10 @@ test "writeToml: array-within-dotted expands dotted member into explicit table h
     const written = try out.toOwnedSlice();
     defer gpa.free(written);
 
-    try std.testing.expect(std.mem.indexOf(u8, written, "apple.color = \"red\"") == null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "[fruit.apple]\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "color = \"red\"\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, written, "[[fruit.apple.seeds]]\n") != null);
+    try std.testing.expect(std.mem.find(u8, written, "apple.color = \"red\"") == null);
+    try std.testing.expect(std.mem.find(u8, written, "[fruit.apple]\n") != null);
+    try std.testing.expect(std.mem.find(u8, written, "color = \"red\"\n") != null);
+    try std.testing.expect(std.mem.find(u8, written, "[[fruit.apple.seeds]]\n") != null);
     try expectReparseMatches(gpa, root, written);
 }
 
@@ -1065,9 +1065,9 @@ test "profile: faithful mutation preserves dotted header origin and escaped key 
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "\n[table]\n") == null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[table.withdot]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "\"escaped\\u002edot\" = 7") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "\n[table]\n") == null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "[table.withdot]") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "\"escaped\\u002edot\" = 7") != null);
 }
 
 test "profile: faithful mutation preserves escaped header segments" {
@@ -1103,8 +1103,8 @@ test "profile: faithful mutation preserves escaped header segments" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[\"a.b\".\"\\u00c0\"]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[\"\\\"quoted\\\"\"]") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "[\"a.b\".\"\\u00c0\"]") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "[\"\\\"quoted\\\"\"]") != null);
 }
 
 test "profile: faithful mutation preserves trailing comment spacing" {
@@ -1140,12 +1140,12 @@ test "profile: faithful mutation preserves trailing comment spacing" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "  # Top comment.") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[group] # Comment") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "answer = 77 # Comment") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "dt = 1979-05-27T07:32:12-07:00  # c") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[[aot]]# Comment") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "k = 99# Comment") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "  # Top comment.") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "[group] # Comment") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "answer = 77 # Comment") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "dt = 1979-05-27T07:32:12-07:00  # c") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "[[aot]]# Comment") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "k = 99# Comment") != null);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, w.buffered(), "more ="));
 }
 
@@ -1182,10 +1182,10 @@ test "profile: faithful mutation preserves float lexemes" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "upper = 3E2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "pos = 3E+2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "pointupper = 3.1E2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "minustenth = -1E-1") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "upper = 3E2") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "pos = 3E+2") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "pointupper = 3.1E2") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "minustenth = -1E-1") != null);
 }
 
 test "profile: faithful mutation preserves float underscore lexemes" {
@@ -1221,8 +1221,8 @@ test "profile: faithful mutation preserves float underscore lexemes" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "after = 3141.592_7") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "exponent = 3e1_4") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "after = 3141.592_7") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "exponent = 3e1_4") != null);
 }
 
 test "profile: faithful mutation preserves special float lexemes" {
@@ -1258,8 +1258,8 @@ test "profile: faithful mutation preserves special float lexemes" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "nan_plus = +nan") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "infinity_plus = +inf") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "nan_plus = +nan") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "infinity_plus = +inf") != null);
 }
 
 test "profile: faithful mutation preserves datetime lexemes" {
@@ -1295,9 +1295,9 @@ test "profile: faithful mutation preserves datetime lexemes" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "without-seconds-2 = 1979-05-27 07:32Z") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "without-seconds-3 = 1979-05-27 07:32-07:00") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "without-seconds-4 = 1979-05-27T07:32") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "without-seconds-2 = 1979-05-27 07:32Z") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "without-seconds-3 = 1979-05-27 07:32-07:00") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "without-seconds-4 = 1979-05-27T07:32") != null);
 }
 
 test "profile: faithful mutation preserves datetime fractional lexemes" {
@@ -1337,8 +1337,8 @@ test "profile: faithful mutation preserves datetime fractional lexemes" {
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "1987-07-05T17:45:56.6Z") != null);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "1987-07-05T17:45:56.6+08:00") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "1987-07-05T17:45:56.6Z") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "1987-07-05T17:45:56.6+08:00") != null);
 }
 
 test "profile: faithful mutation ignores internal comment trivia without duplicating keys" {
@@ -1374,7 +1374,7 @@ test "profile: faithful mutation ignores internal comment trivia without duplica
     var w = std.Io.Writer.fixed(out_buf);
     try toml.writeTomlWithProfile(.{ .table = root }, &w, .faithful, &hints, gpa);
 
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "[section]#attached comment") != null);
+    try std.testing.expect(std.mem.find(u8, w.buffered(), "[section]#attached comment") != null);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, w.buffered(), "arr4 ="));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, w.buffered(), "arr5 ="));
 }

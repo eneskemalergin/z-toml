@@ -168,7 +168,7 @@ fn ParserTy(comptime V: type, comptime config: ParseConfig) type {
                 if (document.original_source) |source| gpa.free(source);
                 document.* = .{
                     .has_bom = std.mem.startsWith(u8, input, "\xEF\xBB\xBF"),
-                    .line_ending = if (std.mem.indexOf(u8, input, "\r\n") != null) .crlf else .lf,
+                    .line_ending = if (std.mem.find(u8, input, "\r\n") != null) .crlf else .lf,
                     .original_source = try gpa.dupe(u8, input),
                 };
             };

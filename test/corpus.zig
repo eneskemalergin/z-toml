@@ -40,7 +40,7 @@ fn typedScalar(expected: json.Value) ?TypedScalar {
 }
 
 fn normalizeTemporalValue(buf: []u8, value: []const u8) []const u8 {
-    const dot_index = std.mem.indexOfScalar(u8, value, '.') orelse return value;
+    const dot_index = std.mem.findScalar(u8, value, '.') orelse return value;
 
     var end = dot_index + 1;
     while (end < value.len and std.ascii.isDigit(value[end])) : (end += 1) {}
